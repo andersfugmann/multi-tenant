@@ -1,0 +1,17 @@
+{
+  "name": "url-router-extension",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "lint": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.4",
+    "chrome-types": "^0.1"
+  },
+  "dependencies": {
+    "zod": "^3.23"
+  }
+}

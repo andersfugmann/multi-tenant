@@ -1,0 +1,34 @@
+[package]
+name = "url-router"
+description = "Multi-tenant URL routing daemon and CLI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+url-router-protocol = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+regex = { workspace = true }
+thiserror = { workspace = true }
+derive_more = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap = { workspace = true }
+notify = { workspace = true }
+notify-rust = { workspace = true }
+libc = "0.2"
+
+[package.metadata.deb]
+maintainer = "URL Router Contributors"
+section = "net"
+depends = "$auto"
+conf-files = ["/etc/url-router/config.json"]
+assets = [
+    ["target/release/url-router", "usr/bin/", "755"],
+    ["../../dist/systemd/url-router@.service", "usr/lib/systemd/user/", "644"],
+    ["../../dist/systemd/url-router.tmpfiles", "usr/lib/tmpfiles.d/url-router.conf", "644"],
+    ["../../dist/url-router.desktop", "usr/share/applications/", "644"],
+    ["../../dist/config/config.json", "etc/url-router/", "644"],
+    ["../../dist/examples/url-router.nspawn", "usr/share/url-router/examples/", "644"],
+]

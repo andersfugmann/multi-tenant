@@ -1,0 +1,3 @@
+# Create the shared socket directory for url-router daemons.
+# All tenants (host + containers) access sockets through this directory.
+d /run/url-router 0755 root root -

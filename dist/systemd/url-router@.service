@@ -1,0 +1,11 @@
+[Unit]
+Description=URL Router Daemon (%i)
+Documentation=https://github.com/afu/multi-tenant
+
+[Service]
+ExecStart=/usr/bin/url-router daemon --tenant %i
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

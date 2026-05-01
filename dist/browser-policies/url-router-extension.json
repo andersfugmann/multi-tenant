@@ -1,0 +1,9 @@
+{
+  "ExtensionSettings": {
+    "URL_ROUTER_EXTENSION_ID": {
+      "installation_mode": "force_installed",
+      "override_update_url": true,
+      "update_url": "file:///usr/share/url-router/extension/updates.xml"
+    }
+  }
+}

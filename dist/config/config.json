@@ -1,0 +1,17 @@
+{
+  "tenants": {
+    "host": {
+      "name": "Personal",
+      "browser_cmd": "xdg-open",
+      "socket": "/run/url-router/host.sock",
+      "badge_label": "P",
+      "badge_color": "#4285f4"
+    }
+  },
+  "rules": [],
+  "defaults": {
+    "unmatched": "local",
+    "notifications": true,
+    "notification_timeout_ms": 3000
+  }
+}

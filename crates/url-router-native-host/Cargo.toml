@@ -1,0 +1,29 @@
+[package]
+name = "url-router-native-host"
+description = "Chrome native messaging host bridge for url-router"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+url-router-protocol = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[package.metadata.deb]
+name = "url-router-extension"
+maintainer = "URL Router Contributors"
+section = "net"
+depends = "url-router"
+assets = [
+    ["target/release/url-router-native-host", "usr/bin/", "755"],
+    ["../../dist/native-messaging-hosts/com.url_router.json", "etc/chromium/native-messaging-hosts/", "644"],
+    ["../../dist/native-messaging-hosts/com.url_router.json", "etc/opt/edge/native-messaging-hosts/", "644"],
+    ["../../dist/browser-policies/url-router-extension.json", "etc/chromium/policies/managed/", "644"],
+    ["../../dist/browser-policies/url-router-extension.json", "etc/opt/edge/policies/managed/", "644"],
+    ["../../extension/dist/*", "usr/share/url-router/extension/dist/", "644"],
+    ["../../extension/manifest.json", "usr/share/url-router/extension/", "644"],
+    ["../../extension/popup.html", "usr/share/url-router/extension/", "644"],
+    ["../../extension/icons/*", "usr/share/url-router/extension/icons/", "644"],
+]

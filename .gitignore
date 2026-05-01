@@ -1,0 +1,13 @@
+# Rust
+/target/
+
+# Extension
+extension/node_modules/
+extension/dist/
+
+# Editor
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
