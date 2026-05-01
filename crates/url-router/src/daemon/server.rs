@@ -160,9 +160,7 @@ fn process_line(line: &str, state: &DaemonState) -> Response {
             on_success,
             on_failure,
         } => {
-            let socket = config
-                .tenant(tenant.as_str())
-                .map(|t| t.socket.as_str());
+            let socket = config.tenant(tenant.as_str()).map(|t| t.socket.as_str());
 
             match socket {
                 Some(socket_path) => {
@@ -225,7 +223,7 @@ fn build_status(state: &DaemonState) -> Response {
         peers,
     };
 
-    let json = serde_json::to_string(&status_info)
-        .unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}"));
+    let json =
+        serde_json::to_string(&status_info).unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}"));
     Response::Status { json }
 }

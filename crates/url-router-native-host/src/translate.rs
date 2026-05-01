@@ -36,9 +36,7 @@ pub fn json_to_line(json_bytes: &[u8]) -> Result<String, String> {
             Ok(format!("open-on {tenant} {url}"))
         }
         "add-rule" => {
-            let rule = value
-                .get("rule")
-                .ok_or("missing 'rule' field")?;
+            let rule = value.get("rule").ok_or("missing 'rule' field")?;
             let rule_json = serde_json::to_string(rule)
                 .map_err(|e| format!("failed to serialize rule: {e}"))?;
             Ok(format!("add-rule {rule_json}"))
@@ -139,7 +137,8 @@ mod tests {
 
     #[test]
     fn json_to_line_add_rule() {
-        let json = br#"{"cmd": "add-rule", "rule": {"pattern": "^https://x\\.com", "tenant": "work"}}"#;
+        let json =
+            br#"{"cmd": "add-rule", "rule": {"pattern": "^https://x\\.com", "tenant": "work"}}"#;
         let result = json_to_line(json).unwrap();
         assert!(result.starts_with("add-rule "));
         assert!(result.contains("pattern"));

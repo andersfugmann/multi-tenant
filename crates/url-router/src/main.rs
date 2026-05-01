@@ -96,7 +96,7 @@ fn resolve_socket(explicit: Option<&str>, config_path: &str) -> String {
     match config_io::load_config(config_path) {
         Ok(config) => {
             // Try each tenant's socket to see which one exists
-            for (_, tenant) in &config.tenants {
+            for tenant in config.tenants.values() {
                 if Path::new(&tenant.socket).exists() {
                     return tenant.socket.clone();
                 }
@@ -149,4 +149,3 @@ fn run_status(socket: Option<&str>, config_path: &str) {
         }
     }
 }
-

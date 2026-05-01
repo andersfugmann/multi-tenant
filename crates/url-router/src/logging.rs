@@ -11,8 +11,8 @@ use tracing_subscriber::EnvFilter;
 /// If neither is set, defaults to `info`.
 pub fn init(level: Option<&str>) {
     let default_level = level.unwrap_or("info");
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(default_level));
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_level));
 
     tracing_subscriber::fmt()
         .with_env_filter(filter)

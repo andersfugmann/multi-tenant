@@ -52,7 +52,10 @@ pub enum Response {
     /// Generic OK (for open-local, add-rule).
     Ok,
     /// Rule matched at given index.
-    Match { tenant: TenantId, rule_index: RuleIndex },
+    Match {
+        tenant: TenantId,
+        rule_index: RuleIndex,
+    },
     /// No rule matched; shows default action.
     NoMatch { default_action: String },
     /// Full config as JSON.
@@ -133,8 +136,8 @@ impl FromStr for Command {
                     command: "add-rule".into(),
                     expected: "json".into(),
                 })?;
-                let rule: RuleDefinition =
-                    serde_json::from_str(json).map_err(|e| ParseError::InvalidJson(e.to_string()))?;
+                let rule: RuleDefinition = serde_json::from_str(json)
+                    .map_err(|e| ParseError::InvalidJson(e.to_string()))?;
                 Ok(Command::AddRule { rule })
             }
             "get-config" => Ok(Command::GetConfig),
@@ -370,8 +373,9 @@ mod tests {
 
     #[test]
     fn parse_add_rule_command() {
-        let cmd: Command =
-            r#"add-rule {"pattern":"^https://example\\.com","tenant":"work"}"#.parse().unwrap();
+        let cmd: Command = r#"add-rule {"pattern":"^https://example\\.com","tenant":"work"}"#
+            .parse()
+            .unwrap();
         if let Command::AddRule { rule } = cmd {
             assert_eq!(rule.tenant, TenantId::new("work"));
         } else {
@@ -517,16 +521,29 @@ mod tests {
     fn response_roundtrip() {
         let responses = vec![
             Response::Local,
-            Response::Remote { tenant: TenantId::new("work") },
+            Response::Remote {
+                tenant: TenantId::new("work"),
+            },
             Response::Fallback,
             Response::OkLocal,
-            Response::OkForwarded { tenant: TenantId::new("host") },
+            Response::OkForwarded {
+                tenant: TenantId::new("host"),
+            },
             Response::OkFallback,
             Response::Ok,
-            Response::Match { tenant: TenantId::new("work"), rule_index: RuleIndex(3) },
-            Response::NoMatch { default_action: "local".into() },
-            Response::ErrorUnknownTenant { tenant: TenantId::new("bad") },
-            Response::Error { message: "something went wrong".into() },
+            Response::Match {
+                tenant: TenantId::new("work"),
+                rule_index: RuleIndex(3),
+            },
+            Response::NoMatch {
+                default_action: "local".into(),
+            },
+            Response::ErrorUnknownTenant {
+                tenant: TenantId::new("bad"),
+            },
+            Response::Error {
+                message: "something went wrong".into(),
+            },
         ];
         for resp in responses {
             let line = resp.to_string();

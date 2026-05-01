@@ -40,16 +40,10 @@ pub fn handle_command(cmd: Command, config: &Config, local_tenant: &TenantId) ->
         Command::Test { url } => {
             let result = match_url(&url, config);
             let response = match result {
-                MatchResult::Matched {
-                    tenant,
-                    rule_index,
-                } => Response::Match {
-                    tenant,
-                    rule_index,
-                },
-                MatchResult::Unmatched { default_action } => {
-                    Response::NoMatch { default_action }
+                MatchResult::Matched { tenant, rule_index } => {
+                    Response::Match { tenant, rule_index }
                 }
+                MatchResult::Unmatched { default_action } => Response::NoMatch { default_action },
             };
             Action::Respond(response)
         }
@@ -124,12 +118,7 @@ fn handle_open(url: &str, config: &Config, local_tenant: &TenantId) -> Action {
 }
 
 /// Handle `open-on <tenant> <url>` — explicit routing or rule-evaluated.
-fn handle_open_on(
-    tenant: TenantId,
-    url: &str,
-    config: &Config,
-    local_tenant: &TenantId,
-) -> Action {
+fn handle_open_on(tenant: TenantId, url: &str, config: &Config, local_tenant: &TenantId) -> Action {
     if tenant.is_default() {
         // "default" means evaluate rules and launch browser
         return handle_open_on_default(url, config, local_tenant);
@@ -229,7 +218,9 @@ mod tests {
     fn open_local_url_returns_local() {
         let config = test_config();
         let action = handle_command(
-            Command::Open { url: "https://github.com/org/repo".into() },
+            Command::Open {
+                url: "https://github.com/org/repo".into(),
+            },
             &config,
             &TenantId::new("host"),
         );
@@ -240,13 +231,20 @@ mod tests {
     fn open_remote_url_forwards() {
         let config = test_config();
         let action = handle_command(
-            Command::Open { url: "https://outlook.office.com/mail".into() },
+            Command::Open {
+                url: "https://outlook.office.com/mail".into(),
+            },
             &config,
             &TenantId::new("host"),
         );
         assert!(matches!(action, Action::ForwardToPeer { .. }));
         if let Action::ForwardToPeer { on_success, .. } = action {
-            assert_eq!(on_success, Response::Remote { tenant: TenantId::new("work") });
+            assert_eq!(
+                on_success,
+                Response::Remote {
+                    tenant: TenantId::new("work")
+                }
+            );
         }
     }
 
@@ -254,7 +252,9 @@ mod tests {
     fn open_unmatched_url_returns_local_when_default_is_local() {
         let config = test_config();
         let action = handle_command(
-            Command::Open { url: "https://example.org".into() },
+            Command::Open {
+                url: "https://example.org".into(),
+            },
             &config,
             &TenantId::new("host"),
         );
@@ -328,14 +328,19 @@ mod tests {
             &config,
             &TenantId::new("host"),
         );
-        assert!(matches!(action, Action::Respond(Response::ErrorUnknownTenant { .. })));
+        assert!(matches!(
+            action,
+            Action::Respond(Response::ErrorUnknownTenant { .. })
+        ));
     }
 
     #[test]
     fn open_local_launches_browser() {
         let config = test_config();
         let action = handle_command(
-            Command::OpenLocal { url: "https://example.com".into() },
+            Command::OpenLocal {
+                url: "https://example.com".into(),
+            },
             &config,
             &TenantId::new("host"),
         );
@@ -346,7 +351,9 @@ mod tests {
     fn test_command_returns_match() {
         let config = test_config();
         let action = handle_command(
-            Command::Test { url: "https://github.com/org".into() },
+            Command::Test {
+                url: "https://github.com/org".into(),
+            },
             &config,
             &TenantId::new("host"),
         );
@@ -363,13 +370,17 @@ mod tests {
     fn test_command_returns_nomatch() {
         let config = test_config();
         let action = handle_command(
-            Command::Test { url: "https://example.org".into() },
+            Command::Test {
+                url: "https://example.org".into(),
+            },
             &config,
             &TenantId::new("host"),
         );
         assert_eq!(
             action,
-            Action::Respond(Response::NoMatch { default_action: "local".into() })
+            Action::Respond(Response::NoMatch {
+                default_action: "local".into()
+            })
         );
     }
 

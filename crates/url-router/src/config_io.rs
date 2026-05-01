@@ -56,10 +56,7 @@ pub fn add_rule(config_path: &str, rule: Rule) -> Result<(), ConfigIoError> {
 ///
 /// Uses the `notify` crate (inotify on Linux) to watch for modifications.
 /// Updates the shared config state when the file changes.
-pub fn watch_config(
-    config_path: String,
-    config: Arc<RwLock<Config>>,
-) -> Result<(), ConfigIoError> {
+pub fn watch_config(config_path: String, config: Arc<RwLock<Config>>) -> Result<(), ConfigIoError> {
     use notify::{Event, EventKind, RecursiveMode, Watcher};
     use std::sync::mpsc;
 

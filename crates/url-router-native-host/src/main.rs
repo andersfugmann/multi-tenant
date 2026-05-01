@@ -30,13 +30,7 @@ fn main() {
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
 
-    loop {
-        // Read length-prefixed JSON from Chrome
-        let json_bytes = match framing::read_message(&mut stdin) {
-            Ok(bytes) => bytes,
-            Err(_) => break, // EOF or read error — Chrome closed the port
-        };
-
+    while let Ok(json_bytes) = framing::read_message(&mut stdin) {
         // Translate JSON to line command
         let line_cmd = match translate::json_to_line(&json_bytes) {
             Ok(cmd) => cmd,
@@ -88,7 +82,7 @@ fn find_socket_path() -> String {
 
     if let Ok(content) = std::fs::read_to_string(&config_path) {
         if let Ok(config) = url_router_protocol::config::Config::from_json(&content) {
-            for (_, tenant) in &config.tenants {
+            for tenant in config.tenants.values() {
                 if std::path::Path::new(&tenant.socket).exists() {
                     return tenant.socket.clone();
                 }
@@ -98,4 +92,3 @@ fn find_socket_path() -> String {
 
     "/run/url-router/host.sock".to_string()
 }
-

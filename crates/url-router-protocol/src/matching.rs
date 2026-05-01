@@ -17,9 +17,7 @@ pub enum MatchResult {
         rule_index: RuleIndex,
     },
     /// No rule matched. Contains the default action from config.
-    Unmatched {
-        default_action: String,
-    },
+    Unmatched { default_action: String },
 }
 
 /// Evaluate a URL against the config's routing rules.
