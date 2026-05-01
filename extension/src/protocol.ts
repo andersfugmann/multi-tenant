@@ -112,6 +112,10 @@ export type AddRuleCommand = {
   readonly cmd: "add-rule";
   readonly rule: { readonly pattern: string; readonly tenant: string };
 };
+export type SetConfigCommand = {
+  readonly cmd: "set-config";
+  readonly config: Config;
+};
 export type TestCommand = { readonly cmd: "test"; readonly url: string };
 export type GetConfigCommand = { readonly cmd: "get-config" };
 export type StatusCommand = { readonly cmd: "status" };
@@ -120,6 +124,7 @@ export type DaemonCommand =
   | OpenCommand
   | OpenOnCommand
   | AddRuleCommand
+  | SetConfigCommand
   | TestCommand
   | GetConfigCommand
   | StatusCommand;

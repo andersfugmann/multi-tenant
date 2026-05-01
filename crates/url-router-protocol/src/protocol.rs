@@ -28,6 +28,15 @@ pub enum Command {
     Test { url: String },
     /// Append a routing rule to the config file.
     AddRule { rule: RuleDefinition },
+    /// Replace a routing rule at a given index.
+    UpdateRule {
+        index: RuleIndex,
+        rule: RuleDefinition,
+    },
+    /// Delete a routing rule at a given index.
+    DeleteRule { index: RuleIndex },
+    /// Replace the entire configuration.
+    SetConfig { json: String },
     /// Return the current configuration.
     GetConfig,
     /// Return daemon health information.
@@ -79,8 +88,20 @@ pub enum ParseError {
     MissingArgument { command: String, expected: String },
     #[error("invalid JSON in add-rule: {0}")]
     InvalidJson(String),
+    #[error("invalid rule index: {0}")]
+    InvalidIndex(String),
     #[error("unknown response: {0}")]
     UnknownResponse(String),
+    #[error("URL contains invalid characters (newline)")]
+    InvalidUrl,
+}
+
+/// Validate that a URL is safe for the line-based protocol (no newlines).
+fn validate_url(url: &str) -> Result<(), ParseError> {
+    if url.contains('\n') || url.contains('\r') {
+        return Err(ParseError::InvalidUrl);
+    }
+    Ok(())
 }
 
 impl FromStr for Command {
@@ -100,6 +121,7 @@ impl FromStr for Command {
                     command: "open".into(),
                     expected: "url".into(),
                 })?;
+                validate_url(url)?;
                 Ok(Command::Open { url: url.into() })
             }
             "open-on" => {
@@ -112,6 +134,7 @@ impl FromStr for Command {
                     command: "open-on".into(),
                     expected: "url (after tenant-id)".into(),
                 })?;
+                validate_url(url)?;
                 Ok(Command::OpenOn {
                     tenant: TenantId::new(tenant_str),
                     url: url.into(),
@@ -122,6 +145,7 @@ impl FromStr for Command {
                     command: "open-local".into(),
                     expected: "url".into(),
                 })?;
+                validate_url(url)?;
                 Ok(Command::OpenLocal { url: url.into() })
             }
             "test" => {
@@ -129,6 +153,7 @@ impl FromStr for Command {
                     command: "test".into(),
                     expected: "url".into(),
                 })?;
+                validate_url(url)?;
                 Ok(Command::Test { url: url.into() })
             }
             "add-rule" => {
@@ -140,7 +165,50 @@ impl FromStr for Command {
                     .map_err(|e| ParseError::InvalidJson(e.to_string()))?;
                 Ok(Command::AddRule { rule })
             }
+            "update-rule" => {
+                let args = rest.ok_or(ParseError::MissingArgument {
+                    command: "update-rule".into(),
+                    expected: "index json".into(),
+                })?;
+                let (index_str, json) = split_first_word(args);
+                let index: usize = index_str
+                    .parse()
+                    .map_err(|_| ParseError::InvalidIndex(index_str.into()))?;
+                let json = json.ok_or(ParseError::MissingArgument {
+                    command: "update-rule".into(),
+                    expected: "json (after index)".into(),
+                })?;
+                let rule: RuleDefinition = serde_json::from_str(json)
+                    .map_err(|e| ParseError::InvalidJson(e.to_string()))?;
+                Ok(Command::UpdateRule {
+                    index: RuleIndex(index),
+                    rule,
+                })
+            }
+            "delete-rule" => {
+                let index_str = rest.ok_or(ParseError::MissingArgument {
+                    command: "delete-rule".into(),
+                    expected: "index".into(),
+                })?;
+                let index: usize = index_str
+                    .trim()
+                    .parse()
+                    .map_err(|_| ParseError::InvalidIndex(index_str.into()))?;
+                Ok(Command::DeleteRule {
+                    index: RuleIndex(index),
+                })
+            }
             "get-config" => Ok(Command::GetConfig),
+            "set-config" => {
+                let json = rest.ok_or(ParseError::MissingArgument {
+                    command: "set-config".into(),
+                    expected: "json".into(),
+                })?;
+                // Validate it parses as a Config
+                let _: crate::config::Config = serde_json::from_str(json)
+                    .map_err(|e| ParseError::InvalidJson(e.to_string()))?;
+                Ok(Command::SetConfig { json: json.into() })
+            }
             "status" => Ok(Command::Status),
             other => Err(ParseError::UnknownCommand(other.into())),
         }
@@ -158,6 +226,12 @@ impl fmt::Display for Command {
                 let json = serde_json::to_string(rule).expect("rule serialization cannot fail");
                 write!(f, "add-rule {json}")
             }
+            Command::UpdateRule { index, rule } => {
+                let json = serde_json::to_string(rule).expect("rule serialization cannot fail");
+                write!(f, "update-rule {index} {json}")
+            }
+            Command::DeleteRule { index } => write!(f, "delete-rule {index}"),
+            Command::SetConfig { json } => write!(f, "set-config {json}"),
             Command::GetConfig => write!(f, "get-config"),
             Command::Status => write!(f, "status"),
         }

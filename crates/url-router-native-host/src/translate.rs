@@ -41,6 +41,23 @@ pub fn json_to_line(json_bytes: &[u8]) -> Result<String, String> {
                 .map_err(|e| format!("failed to serialize rule: {e}"))?;
             Ok(format!("add-rule {rule_json}"))
         }
+        "update-rule" => {
+            let index = value
+                .get("index")
+                .and_then(|v| v.as_u64())
+                .ok_or("missing 'index' field")?;
+            let rule = value.get("rule").ok_or("missing 'rule' field")?;
+            let rule_json = serde_json::to_string(rule)
+                .map_err(|e| format!("failed to serialize rule: {e}"))?;
+            Ok(format!("update-rule {index} {rule_json}"))
+        }
+        "delete-rule" => {
+            let index = value
+                .get("index")
+                .and_then(|v| v.as_u64())
+                .ok_or("missing 'index' field")?;
+            Ok(format!("delete-rule {index}"))
+        }
         "test" => {
             let url = value
                 .get("url")
@@ -49,6 +66,12 @@ pub fn json_to_line(json_bytes: &[u8]) -> Result<String, String> {
             Ok(format!("test {url}"))
         }
         "get-config" => Ok("get-config".into()),
+        "set-config" => {
+            let config = value.get("config").ok_or("missing 'config' field")?;
+            let config_json = serde_json::to_string(config)
+                .map_err(|e| format!("failed to serialize config: {e}"))?;
+            Ok(format!("set-config {config_json}"))
+        }
         "status" => Ok("status".into()),
         other => Err(format!("unknown cmd: {other}")),
     }

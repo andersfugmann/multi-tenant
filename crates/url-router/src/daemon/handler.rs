@@ -47,21 +47,11 @@ pub fn handle_command(cmd: Command, config: &Config, local_tenant: &TenantId) ->
             };
             Action::Respond(response)
         }
-        Command::AddRule { rule } => {
-            // Validation: check that the tenant exists in config
-            if config.tenant(rule.tenant.as_str()).is_none() {
-                return Action::Respond(Response::ErrorUnknownTenant {
-                    tenant: rule.tenant,
-                });
-            }
-            // Validate regex compiles
-            if let Err(e) = regex::Regex::new(&rule.pattern) {
-                return Action::Respond(Response::Error {
-                    message: format!("invalid regex: {e}"),
-                });
-            }
-            // The actual file write is handled by the caller (I/O boundary)
-            // For now, return Ok — the server will handle the config mutation
+        Command::AddRule { .. }
+        | Command::UpdateRule { .. }
+        | Command::DeleteRule { .. }
+        | Command::SetConfig { .. } => {
+            // Config mutations are handled by the server (I/O boundary)
             Action::Respond(Response::Ok)
         }
         Command::GetConfig => {

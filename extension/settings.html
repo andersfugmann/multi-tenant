@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>URL Router Settings</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      width: 600px;
+      min-height: 400px;
+      padding: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 13px;
+      margin: 0;
+      color: #333;
+    }
+    h2 { margin: 0 0 16px; font-size: 16px; }
+    h3 { margin: 16px 0 8px; font-size: 14px; border-bottom: 1px solid #e0e0e0; padding-bottom: 4px; }
+
+    /* Tabs */
+    .tabs { display: flex; gap: 0; border-bottom: 2px solid #e0e0e0; margin-bottom: 16px; }
+    .tab {
+      padding: 8px 16px; cursor: pointer; border: none; background: none;
+      font-size: 13px; color: #666; border-bottom: 2px solid transparent; margin-bottom: -2px;
+    }
+    .tab:hover { color: #333; }
+    .tab.active { color: #1a73e8; border-bottom-color: #1a73e8; font-weight: 600; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* Forms */
+    label { display: block; font-weight: 600; font-size: 12px; color: #444; margin-bottom: 3px; }
+    input[type="text"], input[type="number"], select {
+      width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 3px;
+      font-size: 13px; margin-bottom: 10px;
+    }
+    input:focus, select:focus { outline: none; border-color: #1a73e8; }
+    .checkbox-row { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
+    .checkbox-row label { display: inline; font-weight: normal; margin: 0; }
+
+    /* Buttons */
+    button {
+      padding: 6px 14px; border: 1px solid #ccc; border-radius: 3px;
+      background: #fff; cursor: pointer; font-size: 12px;
+    }
+    button:hover { background: #f5f5f5; }
+    .btn-primary { background: #1a73e8; color: #fff; border: none; }
+    .btn-primary:hover { background: #1557b0; }
+    .btn-primary:disabled { opacity: 0.5; cursor: default; }
+    .btn-danger { color: #c62828; border-color: #c62828; }
+    .btn-danger:hover { background: #ffebee; }
+    .btn-small { padding: 3px 8px; font-size: 11px; }
+
+    /* Tables */
+    table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+    th { text-align: left; font-size: 11px; color: #888; padding: 4px 6px; border-bottom: 1px solid #e0e0e0; }
+    td { padding: 5px 6px; border-bottom: 1px solid #f0f0f0; font-size: 12px; vertical-align: middle; }
+    td input[type="text"] { margin-bottom: 0; padding: 4px 6px; font-size: 12px; }
+    td select { margin-bottom: 0; padding: 4px 6px; font-size: 12px; }
+    .actions { white-space: nowrap; }
+    .actions button { margin-left: 4px; }
+
+    /* Tenant cards */
+    .tenant-card {
+      border: 1px solid #e0e0e0; border-radius: 4px; padding: 12px;
+      margin-bottom: 10px; position: relative;
+    }
+    .tenant-card .tenant-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .tenant-card .tenant-id { font-weight: 600; font-size: 13px; }
+    .tenant-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+
+    /* Status bar */
+    #status {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      padding: 8px 16px; font-size: 12px; display: none;
+    }
+    .status-ok { background: #e8f5e9; color: #2e7d32; }
+    .status-err { background: #ffebee; color: #c62828; }
+  </style>
+</head>
+<body>
+  <h2>URL Router Settings</h2>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="rules">Rules</button>
+    <button class="tab" data-tab="tenants">Tenants</button>
+    <button class="tab" data-tab="defaults">Defaults</button>
+  </div>
+
+  <!-- Rules tab -->
+  <div id="tab-rules" class="tab-content active">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:30px">#</th>
+          <th>Pattern</th>
+          <th style="width:110px">Tenant</th>
+          <th style="width:50px">On</th>
+          <th style="width:100px"></th>
+        </tr>
+      </thead>
+      <tbody id="rules-body"></tbody>
+    </table>
+    <button id="add-rule-btn" class="btn-primary btn-small">+ Add Rule</button>
+  </div>
+
+  <!-- Tenants tab -->
+  <div id="tab-tenants" class="tab-content">
+    <div id="tenants-list"></div>
+    <button id="add-tenant-btn" class="btn-primary btn-small" style="margin-top:8px">+ Add Tenant</button>
+  </div>
+
+  <!-- Defaults tab -->
+  <div id="tab-defaults" class="tab-content">
+    <label for="def-unmatched">Unmatched URL action</label>
+    <input type="text" id="def-unmatched" placeholder="local or tenant id">
+
+    <div class="checkbox-row">
+      <input type="checkbox" id="def-notifications">
+      <label for="def-notifications">Show desktop notifications</label>
+    </div>
+
+    <label for="def-notif-timeout">Notification timeout (ms)</label>
+    <input type="number" id="def-notif-timeout" min="0" step="500">
+
+    <label for="def-cooldown">Cooldown (seconds)</label>
+    <input type="number" id="def-cooldown" min="0" step="1">
+
+    <button id="save-defaults-btn" class="btn-primary" style="margin-top:8px">Save Defaults</button>
+  </div>
+
+  <div id="status"></div>
+  <script src="dist/settings.js" type="module"></script>
+</body>
+</html>

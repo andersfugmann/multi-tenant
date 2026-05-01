@@ -122,28 +122,34 @@ chrome.contextMenus.onClicked.addListener(
   }
 );
 
-// --- Popup message handler ---
+// --- Internal message handler ---
 
-type PopupMessage =
+type InternalMessage =
   | { readonly type: "getConfig" }
+  | { readonly type: "setConfig"; readonly config: Config }
   | { readonly type: "openOn"; readonly tenant: string; readonly url: string }
   | { readonly type: "addRule"; readonly pattern: string; readonly tenant: string }
   | { readonly type: "test"; readonly url: string };
 
 chrome.runtime.onMessage.addListener(
-  (message: PopupMessage, _sender, sendResponse) => {
-    handlePopupMessage(message).then(sendResponse);
+  (message: InternalMessage, _sender, sendResponse) => {
+    handleInternalMessage(message).then(sendResponse);
     return true; // keep channel open for async response
   }
 );
 
-async function handlePopupMessage(message: PopupMessage): Promise<unknown> {
+async function handleInternalMessage(message: InternalMessage): Promise<unknown> {
   switch (message.type) {
     case "getConfig":
       if (!cachedConfig) {
         await loadConfig();
       }
       return cachedConfig;
+    case "setConfig": {
+      const result = await client.setConfig(message.config);
+      await loadConfig();
+      return result;
+    }
     case "openOn":
       return client.openOn(message.tenant, message.url);
     case "addRule": {

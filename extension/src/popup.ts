@@ -132,4 +132,16 @@ function sendToBackground<T>(message: PopupMessage): Promise<T> {
 
 document.addEventListener("DOMContentLoaded", () => {
   initPopup().catch(console.error);
+
+  const settingsLink = document.getElementById("settings-link") as HTMLAnchorElement;
+  settingsLink.addEventListener("click", (e) => {
+    e.preventDefault();
+    chrome.windows.create({
+      url: "settings.html",
+      type: "popup",
+      width: 640,
+      height: 520,
+    });
+    window.close();
+  });
 });

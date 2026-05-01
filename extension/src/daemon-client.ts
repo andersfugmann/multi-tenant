@@ -99,6 +99,11 @@ export class DaemonClient {
     return this.send({ cmd: "add-rule", rule: { pattern, tenant } });
   }
 
+  /** Send `set-config` — replace the entire configuration. */
+  async setConfig(config: Config): Promise<DaemonResponse> {
+    return this.send({ cmd: "set-config", config });
+  }
+
   /** Send `test <url>` — dry-run routing check. */
   async test(url: string): Promise<DaemonResponse> {
     return this.send({ cmd: "test", url });

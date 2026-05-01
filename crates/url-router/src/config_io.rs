@@ -22,9 +22,76 @@ pub fn load_config(path: &str) -> Result<Config, ConfigIoError> {
 /// Reads the current config, appends the rule, and writes it back
 /// while holding an exclusive flock to prevent concurrent writes.
 pub fn add_rule(config_path: &str, rule: Rule) -> Result<(), ConfigIoError> {
+    modify_config(config_path, |config| {
+        config.rules.push(rule);
+        Ok(())
+    })
+}
+
+/// Replace a rule at the given index.
+pub fn update_rule(config_path: &str, index: usize, rule: Rule) -> Result<(), ConfigIoError> {
+    modify_config(config_path, |config| {
+        if index >= config.rules.len() {
+            return Err(ConfigIoError::IndexOutOfBounds {
+                index,
+                len: config.rules.len(),
+            });
+        }
+        config.rules[index] = rule;
+        Ok(())
+    })
+}
+
+/// Delete a rule at the given index.
+pub fn delete_rule(config_path: &str, index: usize) -> Result<(), ConfigIoError> {
+    modify_config(config_path, |config| {
+        if index >= config.rules.len() {
+            return Err(ConfigIoError::IndexOutOfBounds {
+                index,
+                len: config.rules.len(),
+            });
+        }
+        config.rules.remove(index);
+        Ok(())
+    })
+}
+
+/// Replace the entire config file.
+pub fn set_config(config_path: &str, new_config: Config) -> Result<(), ConfigIoError> {
+    use std::io::Write;
     use std::os::unix::io::AsRawFd;
 
-    let file = fs::OpenOptions::new()
+    let mut file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(config_path)
+        .map_err(ConfigIoError::Read)?;
+
+    let fd = file.as_raw_fd();
+    let ret = unsafe { libc::flock(fd, libc::LOCK_EX) };
+    if ret != 0 {
+        return Err(ConfigIoError::Lock(std::io::Error::last_os_error()));
+    }
+
+    let json = new_config
+        .to_json_pretty()
+        .map_err(ConfigIoError::Serialize)?;
+    file.set_len(0).map_err(ConfigIoError::Write)?;
+    file.write_all(json.as_bytes())
+        .map_err(ConfigIoError::Write)?;
+
+    Ok(())
+}
+
+/// Read-modify-write the config file under an exclusive flock.
+fn modify_config(
+    config_path: &str,
+    mutate: impl FnOnce(&mut Config) -> Result<(), ConfigIoError>,
+) -> Result<(), ConfigIoError> {
+    use std::io::{Read, Seek, Write};
+    use std::os::unix::io::AsRawFd;
+
+    let mut file = fs::OpenOptions::new()
         .read(true)
         .write(true)
         .open(config_path)
@@ -37,16 +104,22 @@ pub fn add_rule(config_path: &str, rule: Rule) -> Result<(), ConfigIoError> {
         return Err(ConfigIoError::Lock(std::io::Error::last_os_error()));
     }
 
-    // Read current config
-    let content = fs::read_to_string(config_path).map_err(ConfigIoError::Read)?;
+    // Read current config via the locked file handle
+    let mut content = String::new();
+    file.read_to_string(&mut content)
+        .map_err(ConfigIoError::Read)?;
     let mut config = Config::from_json(&content).map_err(ConfigIoError::Parse)?;
 
-    // Append rule
-    config.rules.push(rule);
+    // Apply mutation
+    mutate(&mut config)?;
 
-    // Write back
+    // Write back via the locked file handle
     let json = config.to_json_pretty().map_err(ConfigIoError::Serialize)?;
-    fs::write(config_path, json.as_bytes()).map_err(ConfigIoError::Write)?;
+    file.seek(std::io::SeekFrom::Start(0))
+        .map_err(ConfigIoError::Write)?;
+    file.set_len(0).map_err(ConfigIoError::Write)?;
+    file.write_all(json.as_bytes())
+        .map_err(ConfigIoError::Write)?;
 
     // Lock released when file is dropped
     Ok(())
@@ -121,6 +194,8 @@ pub enum ConfigIoError {
     Write(std::io::Error),
     #[error("failed to lock config: {0}")]
     Lock(std::io::Error),
+    #[error("rule index {index} out of bounds (have {len} rules)")]
+    IndexOutOfBounds { index: usize, len: usize },
     #[error("failed to watch config: {0}")]
     Watch(String),
 }

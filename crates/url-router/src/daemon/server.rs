@@ -107,33 +107,72 @@ fn process_line(line: &str, state: &DaemonState) -> Response {
         return build_status(state);
     }
 
-    // Special handling for add-rule (needs config file write)
+    // Special handling for rule mutations (need config file write)
     if let Command::AddRule { ref rule } = cmd {
-        let config = state.config.read().unwrap();
-        // Validate tenant exists
-        if config.tenant(rule.tenant.as_str()).is_none() {
-            return Response::ErrorUnknownTenant {
-                tenant: rule.tenant.clone(),
-            };
-        }
-        // Validate regex
-        if let Err(e) = regex::Regex::new(&rule.pattern) {
-            return Response::Error {
-                message: format!("invalid regex: {e}"),
-            };
-        }
-        drop(config);
+        return handle_rule_validation_and_write(
+            rule,
+            state,
+            |rule| config_io::add_rule(&state.config_path, rule.clone().into()),
+            "rule added",
+        );
+    }
 
-        // Write to config file
-        match config_io::add_rule(&state.config_path, rule.clone().into()) {
+    if let Command::UpdateRule { index, ref rule } = cmd {
+        return handle_rule_validation_and_write(
+            rule,
+            state,
+            |rule| config_io::update_rule(&state.config_path, index.0, rule.clone().into()),
+            "rule updated",
+        );
+    }
+
+    if let Command::DeleteRule { index } = cmd {
+        match config_io::delete_rule(&state.config_path, index.0) {
             Ok(_) => {
-                info!(pattern = %rule.pattern, tenant = %rule.tenant, "rule added");
+                info!(index = index.0, "rule deleted");
                 return Response::Ok;
             }
             Err(e) => {
-                error!(error = %e, "failed to add rule");
+                error!(error = %e, "failed to delete rule");
                 return Response::Error {
-                    message: format!("failed to write config: {e}"),
+                    message: e.to_string(),
+                };
+            }
+        }
+    }
+
+    if let Command::SetConfig { ref json } = cmd {
+        match url_router_protocol::config::Config::from_json(json) {
+            Ok(new_config) => {
+                // Validate all rules reference existing tenants and have valid regexes
+                for rule in &new_config.rules {
+                    if new_config.tenant(rule.tenant.as_str()).is_none() {
+                        return Response::ErrorUnknownTenant {
+                            tenant: rule.tenant.clone(),
+                        };
+                    }
+                    if let Err(e) = regex::Regex::new(&rule.pattern) {
+                        return Response::Error {
+                            message: format!("invalid regex in rule: {e}"),
+                        };
+                    }
+                }
+                match config_io::set_config(&state.config_path, new_config) {
+                    Ok(_) => {
+                        info!("config replaced via set-config");
+                        return Response::Ok;
+                    }
+                    Err(e) => {
+                        error!(error = %e, "failed to write config");
+                        return Response::Error {
+                            message: e.to_string(),
+                        };
+                    }
+                }
+            }
+            Err(e) => {
+                return Response::Error {
+                    message: format!("invalid config JSON: {e}"),
                 };
             }
         }
@@ -242,6 +281,42 @@ fn record_cooldown(state: &DaemonState, url: &str) {
     if map.len() > 100 {
         let cutoff = Duration::from_secs(60);
         map.retain(|_, t| t.elapsed() < cutoff);
+    }
+}
+
+/// Validate a rule (tenant exists, regex compiles) then execute a config write.
+fn handle_rule_validation_and_write(
+    rule: &url_router_protocol::config::RuleDefinition,
+    state: &DaemonState,
+    write_fn: impl FnOnce(
+        &url_router_protocol::config::RuleDefinition,
+    ) -> Result<(), config_io::ConfigIoError>,
+    success_msg: &str,
+) -> Response {
+    let config = state.config.read().unwrap();
+    if config.tenant(rule.tenant.as_str()).is_none() {
+        return Response::ErrorUnknownTenant {
+            tenant: rule.tenant.clone(),
+        };
+    }
+    if let Err(e) = regex::Regex::new(&rule.pattern) {
+        return Response::Error {
+            message: format!("invalid regex: {e}"),
+        };
+    }
+    drop(config);
+
+    match write_fn(rule) {
+        Ok(_) => {
+            info!(pattern = %rule.pattern, tenant = %rule.tenant, "{}", success_msg);
+            Response::Ok
+        }
+        Err(e) => {
+            error!(error = %e, "failed to write config");
+            Response::Error {
+                message: e.to_string(),
+            }
+        }
     }
 }
 
