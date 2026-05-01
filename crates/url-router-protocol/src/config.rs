@@ -139,6 +139,24 @@ impl From<RuleDefinition> for Rule {
     }
 }
 
+/// Return the default config file path.
+///
+/// Respects `$URL_ROUTER_CONFIG`, then `$XDG_CONFIG_HOME/url-router/config.json`,
+/// falling back to `$HOME/.config/url-router/config.json`.
+pub fn default_config_path() -> String {
+    if let Ok(p) = std::env::var("URL_ROUTER_CONFIG") {
+        return p;
+    }
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+        return format!("{xdg}/url-router/config.json");
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        return format!("{home}/.config/url-router/config.json");
+    }
+    // Ultimate fallback (should never happen on a real system)
+    ".config/url-router/config.json".to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

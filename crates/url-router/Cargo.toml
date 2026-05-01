@@ -23,12 +23,11 @@ libc = "0.2"
 maintainer = "URL Router Contributors"
 section = "net"
 depends = "$auto"
-conf-files = ["/etc/url-router/config.json"]
 assets = [
     ["target/release/url-router", "usr/bin/", "755"],
     ["../../dist/systemd/url-router@.service", "usr/lib/systemd/user/", "644"],
     ["../../dist/systemd/url-router.tmpfiles", "usr/lib/tmpfiles.d/url-router.conf", "644"],
     ["../../dist/url-router.desktop", "usr/share/applications/", "644"],
-    ["../../dist/config/config.json", "etc/url-router/", "644"],
+    ["../../dist/config/config.json", "usr/share/url-router/examples/", "644"],
     ["../../dist/examples/url-router.nspawn", "usr/share/url-router/examples/", "644"],
 ]

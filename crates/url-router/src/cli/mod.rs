@@ -24,9 +24,9 @@ pub enum Commands {
         /// Log level (trace, debug, info, warn, error)
         #[arg(long, default_value = "info")]
         log_level: String,
-        /// Path to config file
-        #[arg(long, default_value = "/etc/url-router/config.json")]
-        config: String,
+        /// Path to config file (default: $XDG_CONFIG_HOME/url-router/config.json)
+        #[arg(long)]
+        config: Option<String>,
     },
     /// Open a URL (sends open-on default to daemon)
     Open {
@@ -35,9 +35,9 @@ pub enum Commands {
         /// Socket path (auto-detected from config if not specified)
         #[arg(long)]
         socket: Option<String>,
-        /// Path to config file (used to find socket path)
-        #[arg(long, default_value = "/etc/url-router/config.json")]
-        config: String,
+        /// Path to config file (default: $XDG_CONFIG_HOME/url-router/config.json)
+        #[arg(long)]
+        config: Option<String>,
     },
     /// Test which tenant a URL routes to (dry-run)
     Test {
@@ -46,26 +46,26 @@ pub enum Commands {
         /// Socket path
         #[arg(long)]
         socket: Option<String>,
-        /// Path to config file
-        #[arg(long, default_value = "/etc/url-router/config.json")]
-        config: String,
+        /// Path to config file (default: $XDG_CONFIG_HOME/url-router/config.json)
+        #[arg(long)]
+        config: Option<String>,
     },
     /// Show daemon health status
     Status {
         /// Socket path
         #[arg(long)]
         socket: Option<String>,
-        /// Path to config file
-        #[arg(long, default_value = "/etc/url-router/config.json")]
-        config: String,
+        /// Path to config file (default: $XDG_CONFIG_HOME/url-router/config.json)
+        #[arg(long)]
+        config: Option<String>,
     },
     /// Set up url-router for a tenant (enable service, install handlers)
     Setup {
         /// Tenant ID
         #[arg(long)]
         tenant: String,
-        /// Path to config file
-        #[arg(long, default_value = "/etc/url-router/config.json")]
-        config: String,
+        /// Path to config file (default: $XDG_CONFIG_HOME/url-router/config.json)
+        #[arg(long)]
+        config: Option<String>,
     },
 }

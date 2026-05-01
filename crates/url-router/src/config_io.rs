@@ -66,9 +66,7 @@ pub fn watch_config(config_path: String, config: Arc<RwLock<Config>>) -> Result<
         notify::recommended_watcher(tx).map_err(|e| ConfigIoError::Watch(e.to_string()))?;
 
     // Watch the parent directory (inotify needs the directory for renamed files)
-    let parent = Path::new(&config_path)
-        .parent()
-        .unwrap_or(Path::new("/etc/url-router"));
+    let parent = Path::new(&config_path).parent().unwrap_or(Path::new("."));
 
     watcher
         .watch(parent, RecursiveMode::NonRecursive)

@@ -77,8 +77,7 @@ fn find_socket_path() -> String {
     }
 
     // Try to read config and find a reachable socket
-    let config_path = std::env::var("URL_ROUTER_CONFIG")
-        .unwrap_or_else(|_| "/etc/url-router/config.json".to_string());
+    let config_path = url_router_protocol::config::default_config_path();
 
     if let Ok(content) = std::fs::read_to_string(&config_path) {
         if let Ok(config) = url_router_protocol::config::Config::from_json(&content) {

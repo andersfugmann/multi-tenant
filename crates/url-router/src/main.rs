@@ -13,6 +13,7 @@ use std::time::Instant;
 
 use clap::Parser;
 use tracing::{error, info};
+use url_router_protocol::config::default_config_path;
 use url_router_protocol::types::TenantId;
 
 use cli::{Cli, Commands};
@@ -26,19 +27,34 @@ fn main() {
             tenant,
             log_level,
             config,
-        } => run_daemon(&tenant, &log_level, &config),
+        } => {
+            let config = config.unwrap_or_else(default_config_path);
+            run_daemon(&tenant, &log_level, &config);
+        }
         Commands::Open {
             url,
             socket,
             config,
-        } => run_open(&url, socket.as_deref(), &config),
+        } => {
+            let config = config.unwrap_or_else(default_config_path);
+            run_open(&url, socket.as_deref(), &config);
+        }
         Commands::Test {
             url,
             socket,
             config,
-        } => run_test(&url, socket.as_deref(), &config),
-        Commands::Status { socket, config } => run_status(socket.as_deref(), &config),
-        Commands::Setup { tenant, config } => cli::setup::run(&tenant, &config),
+        } => {
+            let config = config.unwrap_or_else(default_config_path);
+            run_test(&url, socket.as_deref(), &config);
+        }
+        Commands::Status { socket, config } => {
+            let config = config.unwrap_or_else(default_config_path);
+            run_status(socket.as_deref(), &config);
+        }
+        Commands::Setup { tenant, config } => {
+            let config = config.unwrap_or_else(default_config_path);
+            cli::setup::run(&tenant, &config);
+        }
     }
 }
 
