@@ -69,117 +69,101 @@ pub fn handle_command(cmd: Command, config: &Config, local_tenant: &TenantId) ->
     }
 }
 
+/// Resolve a routing target (matched tenant or default action) into the
+/// appropriate local/remote Action.
+fn resolve_target(
+    target: &TenantId,
+    local_tenant: &TenantId,
+    local_action: impl FnOnce() -> Action,
+    remote_action: impl FnOnce(TenantId) -> Action,
+) -> Action {
+    if target == local_tenant {
+        local_action()
+    } else {
+        remote_action(target.clone())
+    }
+}
+
 /// Handle `open <url>` — evaluate rules, respond LOCAL/REMOTE.
 fn handle_open(url: &str, config: &Config, local_tenant: &TenantId) -> Action {
-    let result = match_url(url, config);
-
-    match result {
-        MatchResult::Matched { tenant, .. } => {
-            if &tenant == local_tenant {
-                Action::Respond(Response::Local)
-            } else {
-                Action::ForwardToPeer {
-                    tenant: tenant.clone(),
-                    url: url.to_string(),
-                    on_success: Response::Remote { tenant },
-                    on_failure: Response::Fallback,
-                }
-            }
-        }
+    let target = match match_url(url, config) {
+        MatchResult::Matched { tenant, .. } => tenant,
         MatchResult::Unmatched { default_action } => {
             if default_action == "local" {
-                Action::Respond(Response::Local)
-            } else {
-                // Default action is a tenant ID
-                let target = TenantId::new(&default_action);
-                if target == *local_tenant {
-                    Action::Respond(Response::Local)
-                } else {
-                    Action::ForwardToPeer {
-                        tenant: target.clone(),
-                        url: url.to_string(),
-                        on_success: Response::Remote { tenant: target },
-                        on_failure: Response::Fallback,
-                    }
-                }
+                return Action::Respond(Response::Local);
             }
+            TenantId::new(&default_action)
         }
-    }
+    };
+
+    resolve_target(
+        &target,
+        local_tenant,
+        || Action::Respond(Response::Local),
+        |t| Action::ForwardToPeer {
+            tenant: t.clone(),
+            url: url.to_string(),
+            on_success: Response::Remote { tenant: t },
+            on_failure: Response::Fallback,
+        },
+    )
 }
 
 /// Handle `open-on <tenant> <url>` — explicit routing or rule-evaluated.
 fn handle_open_on(tenant: TenantId, url: &str, config: &Config, local_tenant: &TenantId) -> Action {
     if tenant.is_default() {
-        // "default" means evaluate rules and launch browser
         return handle_open_on_default(url, config, local_tenant);
     }
 
-    // Check tenant exists
     if config.tenant(tenant.as_str()).is_none() {
         return Action::Respond(Response::ErrorUnknownTenant { tenant });
     }
 
-    if tenant == *local_tenant {
-        // Targeting self — open locally
-        Action::OpenLocalBrowser {
+    resolve_target(
+        &tenant,
+        local_tenant,
+        || Action::OpenLocalBrowser {
             url: url.to_string(),
             response: Response::OkLocal,
-        }
-    } else {
-        // Forward to peer
-        Action::ForwardToPeer {
-            tenant: tenant.clone(),
+        },
+        |t| Action::ForwardToPeer {
+            tenant: t.clone(),
             url: url.to_string(),
-            on_success: Response::OkForwarded { tenant },
+            on_success: Response::OkForwarded { tenant: t },
             on_failure: Response::OkFallback,
-        }
-    }
+        },
+    )
 }
 
 /// Handle `open-on default <url>` — evaluate rules and launch browser.
 fn handle_open_on_default(url: &str, config: &Config, local_tenant: &TenantId) -> Action {
-    let result = match_url(url, config);
-
-    match result {
-        MatchResult::Matched { tenant, .. } => {
-            if &tenant == local_tenant {
-                Action::OpenLocalBrowser {
-                    url: url.to_string(),
-                    response: Response::OkLocal,
-                }
-            } else {
-                Action::ForwardToPeer {
-                    tenant: tenant.clone(),
-                    url: url.to_string(),
-                    on_success: Response::OkForwarded { tenant },
-                    on_failure: Response::OkFallback,
-                }
-            }
-        }
+    let target = match match_url(url, config) {
+        MatchResult::Matched { tenant, .. } => tenant,
         MatchResult::Unmatched { default_action } => {
             if default_action == "local" {
-                Action::OpenLocalBrowser {
+                return Action::OpenLocalBrowser {
                     url: url.to_string(),
                     response: Response::OkLocal,
-                }
-            } else {
-                let target = TenantId::new(&default_action);
-                if target == *local_tenant {
-                    Action::OpenLocalBrowser {
-                        url: url.to_string(),
-                        response: Response::OkLocal,
-                    }
-                } else {
-                    Action::ForwardToPeer {
-                        tenant: target.clone(),
-                        url: url.to_string(),
-                        on_success: Response::OkForwarded { tenant: target },
-                        on_failure: Response::OkFallback,
-                    }
-                }
+                };
             }
+            TenantId::new(&default_action)
         }
-    }
+    };
+
+    resolve_target(
+        &target,
+        local_tenant,
+        || Action::OpenLocalBrowser {
+            url: url.to_string(),
+            response: Response::OkLocal,
+        },
+        |t| Action::ForwardToPeer {
+            tenant: t.clone(),
+            url: url.to_string(),
+            on_success: Response::OkForwarded { tenant: t },
+            on_failure: Response::OkFallback,
+        },
+    )
 }
 
 #[cfg(test)]

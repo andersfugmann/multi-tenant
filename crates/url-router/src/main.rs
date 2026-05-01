@@ -113,15 +113,15 @@ fn resolve_socket(explicit: Option<&str>, config_path: &str) -> String {
     // Use hostname-based heuristic or first available socket
     match config_io::load_config(config_path) {
         Ok(config) => {
-            // Try each tenant's socket to see which one exists
-            for tenant in config.tenants.values() {
-                if Path::new(&tenant.socket).exists() {
-                    return tenant.socket.clone();
-                }
-            }
-            // Fallback
-            eprintln!("error: no reachable daemon socket found. Use --socket to specify.");
-            process::exit(1);
+            config
+                .tenants
+                .values()
+                .find(|t| Path::new(&t.socket).exists())
+                .map(|t| t.socket.clone())
+                .unwrap_or_else(|| {
+                    eprintln!("error: no reachable daemon socket found. Use --socket to specify.");
+                    process::exit(1);
+                })
         }
         Err(e) => {
             eprintln!("error: failed to read config: {e}. Use --socket to specify.");

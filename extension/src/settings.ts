@@ -40,15 +40,15 @@ async function init(): Promise<void> {
 // --- Tabs ---
 
 function setupTabs(): void {
-  for (const tab of Array.from(document.querySelectorAll<HTMLButtonElement>(".tab"))) {
+  document.querySelectorAll<HTMLButtonElement>(".tab").forEach(tab => {
     tab.addEventListener("click", () => {
-      for (const t of Array.from(document.querySelectorAll(".tab"))) t.classList.remove("active");
-      for (const c of Array.from(document.querySelectorAll(".tab-content"))) c.classList.remove("active");
+      document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+      document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
       tab.classList.add("active");
       const target = document.getElementById(`tab-${tab.dataset["tab"]}`);
       if (target) target.classList.add("active");
     });
-  }
+  });
 }
 
 // --- Rules ---
@@ -132,13 +132,13 @@ function renderRules(): void {
 function createTenantSelect(selectedTenant: string): HTMLSelectElement {
   const select = document.createElement("select");
   if (!config) return select;
-  for (const [id, tenant] of Object.entries(config.tenants)) {
+  Object.entries(config.tenants).forEach(([id, tenant]) => {
     const opt = document.createElement("option");
     opt.value = id;
     opt.textContent = tenant.name;
     if (id === selectedTenant) opt.selected = true;
     select.appendChild(opt);
-  }
+  });
   return select;
 }
 

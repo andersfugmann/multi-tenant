@@ -142,40 +142,41 @@ fn process_line(line: &str, state: &DaemonState) -> Response {
     }
 
     if let Command::SetConfig { ref json } = cmd {
-        match url_router_protocol::config::Config::from_json(json) {
-            Ok(new_config) => {
-                // Validate all rules reference existing tenants and have valid regexes
-                for rule in &new_config.rules {
-                    if new_config.tenant(rule.tenant.as_str()).is_none() {
-                        return Response::ErrorUnknownTenant {
-                            tenant: rule.tenant.clone(),
-                        };
-                    }
-                    if let Err(e) = regex::Regex::new(&rule.pattern) {
-                        return Response::Error {
-                            message: format!("invalid regex in rule: {e}"),
-                        };
-                    }
-                }
-                match config_io::set_config(&state.config_path, new_config) {
-                    Ok(_) => {
-                        info!("config replaced via set-config");
-                        return Response::Ok;
-                    }
-                    Err(e) => {
-                        error!(error = %e, "failed to write config");
-                        return Response::Error {
-                            message: e.to_string(),
-                        };
-                    }
-                }
-            }
+        let new_config = match url_router_protocol::config::Config::from_json(json) {
+            Ok(c) => c,
             Err(e) => {
                 return Response::Error {
                     message: format!("invalid config JSON: {e}"),
                 };
             }
+        };
+
+        // Validate all rules reference existing tenants and have valid regexes
+        if let Some(err) = new_config.rules.iter().find_map(|rule| {
+            if new_config.tenant(rule.tenant.as_str()).is_none() {
+                return Some(Response::ErrorUnknownTenant {
+                    tenant: rule.tenant.clone(),
+                });
+            }
+            regex::Regex::new(&rule.pattern).err().map(|e| Response::Error {
+                message: format!("invalid regex in rule: {e}"),
+            })
+        }) {
+            return err;
         }
+
+        return match config_io::set_config(&state.config_path, new_config) {
+            Ok(_) => {
+                info!("config replaced via set-config");
+                Response::Ok
+            }
+            Err(e) => {
+                error!(error = %e, "failed to write config");
+                Response::Error {
+                    message: e.to_string(),
+                }
+            }
+        };
     }
 
     // Cooldown check: if this URL was recently opened via open-local,
@@ -278,10 +279,8 @@ fn record_cooldown(state: &DaemonState, url: &str) {
     map.insert(url.to_string(), Instant::now());
 
     // Periodic cleanup: remove entries older than 60s to prevent unbounded growth
-    if map.len() > 100 {
-        let cutoff = Duration::from_secs(60);
-        map.retain(|_, t| t.elapsed() < cutoff);
-    }
+    let cutoff = Duration::from_secs(60);
+    map.retain(|_, t| t.elapsed() < cutoff);
 }
 
 /// Validate a rule (tenant exists, regex compiles) then execute a config write.
@@ -325,17 +324,19 @@ fn build_status(state: &DaemonState) -> Response {
     let config = state.config.read().unwrap();
     let uptime = state.start_time.elapsed().as_secs();
 
-    let mut peers = std::collections::HashMap::new();
-    for (id, tenant) in &config.tenants {
-        if id != state.tenant.as_str() {
+    let peers = config
+        .tenants
+        .iter()
+        .filter(|(id, _)| id.as_str() != state.tenant.as_str())
+        .map(|(id, tenant)| {
             let status = if Path::new(&tenant.socket).exists() {
                 "reachable"
             } else {
                 "unreachable"
             };
-            peers.insert(id.clone(), status.to_string());
-        }
-    }
+            (id.clone(), status.to_string())
+        })
+        .collect();
 
     let status_info = StatusInfo {
         tenant: state.tenant.clone(),

@@ -12,7 +12,25 @@ import type { Config } from "./protocol.js";
 import type { DaemonClient } from "./daemon-client.js";
 
 const SEND_PREFIX = "url-router-send-to-";
+const LINK_PREFIX = "url-router-link-";
 const ASSIGN_ID = "url-router-assign-tenant";
+
+/** Create submenu items for each tenant. */
+function createTenantSubmenus(
+  config: Config,
+  prefix: string,
+  parentId: string,
+  contexts: [chrome.contextMenus.ContextType, ...chrome.contextMenus.ContextType[]]
+): void {
+  Object.entries(config.tenants).forEach(([tenantId, tenant]) => {
+    chrome.contextMenus.create({
+      id: `${prefix}${tenantId}`,
+      parentId,
+      title: tenant.name,
+      contexts,
+    });
+  });
+}
 
 /** Build context menu items from the current config. */
 export function buildContextMenus(config: Config): void {
@@ -24,15 +42,7 @@ export function buildContextMenus(config: Config): void {
       title: "Send to",
       contexts: ["page"],
     });
-
-    for (const [tenantId, tenant] of Object.entries(config.tenants)) {
-      chrome.contextMenus.create({
-        id: `${SEND_PREFIX}${tenantId}`,
-        parentId: sendParent,
-        title: tenant.name,
-        contexts: ["page"],
-      });
-    }
+    createTenantSubmenus(config, SEND_PREFIX, sendParent, ["page"]);
 
     // --- Page context: "Assign tenant…" ---
     chrome.contextMenus.create({
@@ -48,15 +58,7 @@ export function buildContextMenus(config: Config): void {
       title: "Open link in",
       contexts: ["link"],
     });
-
-    for (const [tenantId, tenant] of Object.entries(config.tenants)) {
-      chrome.contextMenus.create({
-        id: `url-router-link-${tenantId}`,
-        parentId: linkParent,
-        title: tenant.name,
-        contexts: ["link"],
-      });
-    }
+    createTenantSubmenus(config, LINK_PREFIX, linkParent, ["link"]);
   });
 }
 
@@ -105,8 +107,8 @@ export function handleContextMenuClick(
   }
 
   // "Open link in <tenant>" — forward a link
-  if (menuItemId.startsWith("url-router-link-")) {
-    const tenantId = menuItemId.slice("url-router-link-".length);
+  if (menuItemId.startsWith(LINK_PREFIX)) {
+    const tenantId = menuItemId.slice(LINK_PREFIX.length);
     const url = info.linkUrl;
     if (!url) return;
 

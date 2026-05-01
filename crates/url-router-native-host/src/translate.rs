@@ -97,11 +97,11 @@ pub fn line_to_json(line: &str) -> Vec<u8> {
         }
         _ if line.starts_with("MATCH ") => {
             let rest = &line["MATCH ".len()..];
-            let parts: Vec<&str> = rest.splitn(2, ' ').collect();
-            if parts.len() == 2 {
-                serde_json::json!({"status": "MATCH", "tenant": parts[0], "rule_index": parts[1]})
-            } else {
-                serde_json::json!({"status": "MATCH", "raw": rest})
+            match rest.split_once(' ') {
+                Some((tenant, rule_index)) => {
+                    serde_json::json!({"status": "MATCH", "tenant": tenant, "rule_index": rule_index})
+                }
+                None => serde_json::json!({"status": "MATCH", "raw": rest}),
             }
         }
         _ if line.starts_with("NOMATCH ") => {

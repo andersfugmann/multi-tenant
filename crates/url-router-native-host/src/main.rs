@@ -81,10 +81,13 @@ fn find_socket_path() -> String {
 
     if let Ok(content) = std::fs::read_to_string(&config_path) {
         if let Ok(config) = url_router_protocol::config::Config::from_json(&content) {
-            for tenant in config.tenants.values() {
-                if std::path::Path::new(&tenant.socket).exists() {
-                    return tenant.socket.clone();
-                }
+            if let Some(socket) = config
+                .tenants
+                .values()
+                .find(|t| std::path::Path::new(&t.socket).exists())
+                .map(|t| t.socket.clone())
+            {
+                return socket;
             }
         }
     }
