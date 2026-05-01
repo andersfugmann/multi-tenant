@@ -6,9 +6,10 @@ mod forwarding;
 mod logging;
 mod notification;
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::process;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 
 use clap::Parser;
@@ -91,6 +92,7 @@ fn run_daemon(tenant: &str, log_level: &str, config_path: &str) {
         tenant: tenant_id,
         config_path: config_path.to_string(),
         start_time: Instant::now(),
+        cooldown: Mutex::new(HashMap::new()),
     });
 
     info!(tenant = tenant, socket = %socket_path, "starting daemon");

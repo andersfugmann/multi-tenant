@@ -90,6 +90,10 @@ pub struct Defaults {
     /// Timeout for desktop notifications in milliseconds.
     #[serde(default = "Defaults::default_notification_timeout_ms")]
     pub notification_timeout_ms: u32,
+    /// Cooldown in seconds after receiving `open-local` during which
+    /// `open` for the same URL is forced LOCAL (prevents routing loops).
+    #[serde(default = "Defaults::default_cooldown_secs")]
+    pub cooldown_secs: u64,
 }
 
 impl Defaults {
@@ -104,6 +108,10 @@ impl Defaults {
     fn default_notification_timeout_ms() -> u32 {
         3000
     }
+
+    fn default_cooldown_secs() -> u64 {
+        5
+    }
 }
 
 impl Default for Defaults {
@@ -112,6 +120,7 @@ impl Default for Defaults {
             unmatched: Self::default_unmatched(),
             notifications: Self::default_notifications(),
             notification_timeout_ms: Self::default_notification_timeout_ms(),
+            cooldown_secs: Self::default_cooldown_secs(),
         }
     }
 }

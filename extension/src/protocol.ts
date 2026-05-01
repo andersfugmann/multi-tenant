@@ -88,6 +88,7 @@ const DefaultsSchema = z.object({
   unmatched: z.string().default("local"),
   notifications: z.boolean().default(true),
   notification_timeout_ms: z.number().default(3000),
+  cooldown_secs: z.number().default(5),
 });
 
 export const ConfigSchema = z.object({

@@ -4,12 +4,13 @@
 //! spawns a thread per connection, parses protocol commands, dispatches to the
 //! handler, and executes any resulting actions (browser launch, forwarding).
 
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use tracing::{debug, error, info, warn};
 use url_router_protocol::config::Config;
@@ -28,6 +29,9 @@ pub struct DaemonState {
     pub tenant: TenantId,
     pub config_path: String,
     pub start_time: Instant,
+    /// URLs recently opened via `open-local` (from peer forwarding).
+    /// Checked on `open` to prevent routing loops.
+    pub cooldown: Mutex<HashMap<String, Instant>>,
 }
 
 /// Start the daemon server on the given socket path.
@@ -135,6 +139,15 @@ fn process_line(line: &str, state: &DaemonState) -> Response {
         }
     }
 
+    // Cooldown check: if this URL was recently opened via open-local,
+    // force LOCAL to prevent routing loops.
+    if let Command::Open { ref url } = cmd {
+        if is_cooling_down(state, url) {
+            debug!(url = %url, "cooldown active, forcing LOCAL");
+            return Response::Local;
+        }
+    }
+
     let config = state.config.read().unwrap();
     let action = handle_command(cmd, &config, &state.tenant);
 
@@ -151,6 +164,8 @@ fn process_line(line: &str, state: &DaemonState) -> Response {
                     message: format!("browser launch failed: {e}"),
                 };
             }
+            // Record cooldown when the open was triggered by a peer (open-local)
+            record_cooldown(state, &url);
             info!(url = %url, browser = browser_cmd, "opened locally");
             response
         }
@@ -195,6 +210,38 @@ fn process_line(line: &str, state: &DaemonState) -> Response {
                 }
             }
         }
+    }
+}
+
+/// Check if a URL is in the cooldown window.
+fn is_cooling_down(state: &DaemonState, url: &str) -> bool {
+    let cooldown_secs = state
+        .config
+        .read()
+        .map(|c| c.defaults.cooldown_secs)
+        .unwrap_or(5);
+    let cooldown = Duration::from_secs(cooldown_secs);
+
+    let mut map = state.cooldown.lock().unwrap();
+    if let Some(opened_at) = map.get(url) {
+        if opened_at.elapsed() < cooldown {
+            return true;
+        }
+        // Expired — clean up
+        map.remove(url);
+    }
+    false
+}
+
+/// Record a URL in the cooldown map (called after open-local launches browser).
+fn record_cooldown(state: &DaemonState, url: &str) {
+    let mut map = state.cooldown.lock().unwrap();
+    map.insert(url.to_string(), Instant::now());
+
+    // Periodic cleanup: remove entries older than 60s to prevent unbounded growth
+    if map.len() > 100 {
+        let cutoff = Duration::from_secs(60);
+        map.retain(|_, t| t.elapsed() < cutoff);
     }
 }
 

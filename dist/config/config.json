@@ -12,6 +12,7 @@
   "defaults": {
     "unmatched": "local",
     "notifications": true,
-    "notification_timeout_ms": 3000
+    "notification_timeout_ms": 3000,
+    "cooldown_secs": 5
   }
 }
