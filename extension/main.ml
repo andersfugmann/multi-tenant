@@ -61,7 +61,7 @@ type event =
   | Port_disconnected
   | Connect_requested
   | Connect_with_settings of { port : native_port; tenant_name : string; socket_path : string; debug_logging : bool }
-  | Context_menu of { menu_id : string; link_url : string; page_url : string }
+  | Context_menu of { menu_id : string; link_url : string; page_url : string; tab_id : int option }
   | Popup_query of { json : Yojson.Safe.t; respond : Yojson.Safe.t -> unit }
   | Setup_menus
   | Refresh_menus of { tenants : string list }
@@ -212,7 +212,7 @@ let handle_navigation (state : state) (url : string) (tab_id : int) : state =
            | Error msg -> log (Printf.sprintf "Open error: %s" msg)))
 
 let handle_context_menu (state : state) (menu_id : string)
-    (link_url : string) (page_url : string) : state =
+    (link_url : string) (page_url : string) (tab_id : int option) : state =
   match String.lsplit2 menu_id ~on:':' with
   | Some ("open_in", target) ->
     (match String.is_empty link_url with
@@ -225,7 +225,7 @@ let handle_context_menu (state : state) (menu_id : string)
      | true -> state
      | false ->
        send_command state (Command (Open_on (target, page_url)))
-         (fun _resp -> ()))
+         (fun _resp -> Option.iter tab_id ~f:Chrome_api.Tabs.remove))
   | _ ->
   match menu_id with
   | "add_rule" ->
@@ -375,8 +375,8 @@ let handle_event (state : state) (event : event) : state =
   | Connect_requested -> connect state
   | Connect_with_settings { port; tenant_name; socket_path; debug_logging } ->
     connect_with_settings port tenant_name socket_path ~debug_logging
-  | Context_menu { menu_id; link_url; page_url } ->
-    handle_context_menu state menu_id link_url page_url
+  | Context_menu { menu_id; link_url; page_url; tab_id } ->
+    handle_context_menu state menu_id link_url page_url tab_id
   | Popup_query { json; respond } -> handle_popup_query state json respond
   | Setup_menus ->
     setup_context_menus state.tenant_names;
@@ -401,8 +401,8 @@ let register_chrome_listeners () : unit =
       match frame_id with
       | 0 -> push (Navigation { url; tab_id })
       | _ -> ());
-  on_context_menu_clicked (fun menu_id link_url page_url ->
-      push (Context_menu { menu_id; link_url; page_url }));
+  on_context_menu_clicked (fun menu_id link_url page_url tab_id ->
+      push (Context_menu { menu_id; link_url; page_url; tab_id }));
   Chrome_api.Runtime.on_message (fun msg_str respond ->
      match json_of_string msg_str with
      | Error _ ->

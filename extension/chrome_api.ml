@@ -248,10 +248,14 @@ module Context_menus = struct
     method pageUrl : Js.js_string Js.t Js.Optdef.t Js.readonly_prop
   end
 
-  let on_clicked (f : string -> string -> string -> unit) : unit =
+  class type tab_info = object
+    method id : int Js.Optdef.t Js.readonly_prop
+  end
+
+  let on_clicked (f : string -> string -> string -> int option -> unit) : unit =
     add_listener (menus ()) "onClicked"
       (inject
-         (Js.wrap_callback (fun (info : click_info Js.t) _tab ->
+         (Js.wrap_callback (fun (info : click_info Js.t) (tab : tab_info Js.t) ->
               let menu_id = Js.to_string info##.menuItemId in
               let link_url =
                 Js.Optdef.case info##.linkUrl
@@ -263,7 +267,8 @@ module Context_menus = struct
                   (fun () -> "")
                   Js.to_string
               in
-              f menu_id link_url page_url)))
+              let tab_id = Js.Optdef.to_option tab##.id in
+              f menu_id link_url page_url tab_id)))
 end
 
 (* ── Web Navigation ──────────────────────────────────────────────── *)

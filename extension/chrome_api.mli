@@ -47,7 +47,7 @@ module Context_menus : sig
     contexts:string list ->
     unit
   val remove_all : (unit -> unit) -> unit
-  val on_clicked : (string -> string -> string -> unit) -> unit
+  val on_clicked : (string -> string -> string -> int option -> unit) -> unit
 end
 
 module Web_navigation : sig
