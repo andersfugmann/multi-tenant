@@ -118,8 +118,9 @@ its first argument) and reloads on changes. See
 | `defaults.cooldown_seconds` | Suppress repeated (tenant, URL) routing within this window. |
 | `defaults.browser_launch_timeout` | Seconds to wait for browser registration after `browser_cmd`. |
 
-Configuration can also be edited via the extension's settings page or the
-CLI (`get-config`, `set-config`, `add-rule`, `update-rule`, `delete-rule`).
+Configuration can also be modified via the CLI (`get-config`, `set-config`,
+`add-rule`, `update-rule`, `delete-rule`) or by editing the JSON file
+directly (the daemon picks up changes automatically).
 
 ## Usage
 
@@ -148,14 +149,49 @@ xdg-settings set default-web-browser url-router-client.desktop
 
 ### Browser Extension
 
-- **Navigation interception** — top-frame HTTP/HTTPS navigations are
-  checked against rules. Remote URLs close the tab; the URL opens in the
-  target tenant's browser.
-- **Toolbar badge** — shows the owning tenant's label and color.
-- **Popup** — per-tenant "Open in" buttons and a "Remember" button to
-  create a rule for the current site.
-- **Context menus** — right-click a page or link to send/open in a
-  specific tenant, or assign a permanent rule.
+The extension runs as a Chromium service worker that communicates with
+the daemon through the native messaging bridge.
+
+#### Navigation Interception
+
+Every top-frame HTTP/HTTPS navigation is sent to the daemon as an `OPEN`
+command (the bridge injects the tenant ID transparently). Based on the
+response:
+
+| Response | Behaviour |
+|----------|-----------|
+| **LOCAL** | Navigation proceeds normally in the current browser. |
+| **REMOTE** | The URL has been pushed to the target tenant's browser; logged to the service worker console. |
+| **ERR** | Error is logged; navigation proceeds. |
+
+Internal URLs (`chrome://`, `about:`, `chrome-extension://`) are ignored.
+
+#### Receiving URLs
+
+When the daemon pushes a `NAVIGATE` message (another tenant routed a URL
+here), the extension opens a new tab with that URL.
+
+#### Popup
+
+Click the extension icon to open a small panel:
+
+- **Connection indicator** — green dot (connected) or red dot
+  (disconnected) showing the native messaging host status.
+- **View status** — queries the daemon for registered tenants and
+  uptime; displays the JSON response.
+- **View config** — queries the daemon for the current configuration;
+  displays the JSON response.
+- **Reconnect** — re-establishes the native messaging connection if it
+  was lost.
+
+#### Context Menus
+
+Right-click context menus provide quick routing actions:
+
+| Context | Menu item | Action |
+|---------|-----------|--------|
+| **Link** | *Open in tenant…* | Routes the link URL through the daemon. |
+| **Page** | *Send page to tenant…* | Routes the current page URL through the daemon. |
 
 ## Building from Source
 
