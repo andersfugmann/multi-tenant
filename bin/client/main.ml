@@ -308,14 +308,16 @@ let () =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
   let argv = Sys.get_argv () in
-  (* Detect bridge mode: explicit --bridge flag or stdin is not a terminal *)
+  (* Detect bridge mode: explicit --bridge flag, chrome-extension:// origin arg,
+     or stdin is not a terminal *)
   let mode =
-    match Array.length argv > 1 with
-    | true -> parse_cli argv
-    | false ->
+    match Array.length argv with
+    | 1 ->
       (match is_terminal () with
        | true -> parse_cli argv
        | false -> Bridge)
+    | 2 when String.is_prefix (Array.get argv 1) ~prefix:"chrome-extension://" -> Bridge
+    | _ -> parse_cli argv
   in
   match mode with
   | Bridge -> run_bridge env
