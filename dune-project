@@ -21,6 +21,12 @@
    (>= 3.0))
   (ppx_jane
    (>= v0.17))
+  (eio
+   (>= 1.0))
+  (eio_main
+   (>= 1.0))
+  (re
+   (>= 1.0))
   (alcotest
    (and
     :with-test
