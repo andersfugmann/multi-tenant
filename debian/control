@@ -1,7 +1,7 @@
 Source: url-router
 Section: net
 Priority: optional
-Maintainer: url-router maintainers <maintainers@url-router>
+Maintainer: Anders Fugmann <anders@fugmann.net>
 Build-Depends: debhelper-compat (= 13)
 Standards-Version: 4.6.0
 
