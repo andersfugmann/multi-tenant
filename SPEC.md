@@ -53,18 +53,20 @@ The protocol is line-based (one message per line, newline-terminated) over a Uni
 
 ### Commands (client → daemon)
 
+All commands may return `ERR <message>` on failure.
+
 | Command | Description | Responses |
 |---|---|---|
 | `register <tenant_id>` | Register as a listener for this tenant | OK, ERR |
 | `open <tenant_id> <url>` | Route a URL (tenant_id = source tenant) | LOCAL, REMOTE, ERR |
 | `open-on <tenant_id> <url>` | Send URL to a specific target tenant | REMOTE, ERR |
-| `test <url>` | Dry-run rule evaluation | MATCH, NOMATCH |
-| `get-config` | Retrieve configuration | CONFIG |
+| `test <url>` | Dry-run rule evaluation | MATCH, NOMATCH, ERR |
+| `get-config` | Retrieve configuration | CONFIG, ERR |
 | `set-config <json>` | Replace entire configuration | OK, ERR |
 | `add-rule <json>` | Append a routing rule | OK, ERR |
 | `update-rule <index> <json>` | Replace a rule at an index | OK, ERR |
 | `delete-rule <index>` | Remove a rule by index | OK, ERR |
-| `status` | Daemon status (registered tenants, counts) | STATUS |
+| `status` | Daemon status (registered tenants, counts) | STATUS, ERR |
 
 ### Responses (daemon → client on command connections)
 
