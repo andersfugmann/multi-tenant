@@ -328,6 +328,15 @@ let run_bridge env =
   in
   let sock_path = Option.value sock_override ~default:(socket_path ()) in
   let (registered, resolve_registered) = Eio.Promise.create () in
+  let resolve_once =
+    let resolved = ref false in
+    fun () ->
+      match !resolved with
+      | true -> ()
+      | false ->
+        resolved := true;
+        Eio.Promise.resolve resolve_registered ()
+  in
   Eio.Fiber.both
     (fun () ->
       Eio.Promise.await registered;
@@ -337,7 +346,7 @@ let run_bridge env =
     (fun () ->
       bridge_push_fiber ~net ~tenant ~brand ~sock_path
         ~write_out
-        ~on_registered:(fun () -> Eio.Promise.resolve resolve_registered ()))
+        ~on_registered:resolve_once)
 
 (* -- Detect if running as native messaging host *)
 
