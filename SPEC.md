@@ -57,16 +57,16 @@ All commands may return `ERR <message>` on failure.
 
 | Command | Description | Responses |
 |---|---|---|
-| `register <tenant_id>` | Register as a listener for this tenant | OK, ERR |
-| `open <tenant_id> <url>` | Route a URL (tenant_id = source tenant) | LOCAL, REMOTE, ERR |
-| `open-on <tenant_id> <url>` | Send URL to a specific target tenant | REMOTE, ERR |
-| `test <url>` | Dry-run rule evaluation | MATCH, NOMATCH, ERR |
-| `get-config` | Retrieve configuration | CONFIG, ERR |
-| `set-config <json>` | Replace entire configuration | OK, ERR |
-| `add-rule <json>` | Append a routing rule | OK, ERR |
-| `update-rule <index> <json>` | Replace a rule at an index | OK, ERR |
-| `delete-rule <index>` | Remove a rule by index | OK, ERR |
-| `status` | Daemon status (registered tenants, counts) | STATUS, ERR |
+| `REGISTER <tenant_id>` | Register as a listener for this tenant | OK, ERR |
+| `OPEN <tenant_id> <url>` | Route a URL (tenant_id = source tenant) | LOCAL, REMOTE, ERR |
+| `OPEN-ON <tenant_id> <target> <url>` | Send URL to a specific target tenant | REMOTE, ERR |
+| `TEST <tenant_id> <url>` | Dry-run rule evaluation | MATCH, NOMATCH, ERR |
+| `GET-CONFIG <tenant_id>` | Retrieve configuration | CONFIG, ERR |
+| `SET-CONFIG <tenant_id> <json>` | Replace entire configuration | OK, ERR |
+| `ADD-RULE <tenant_id> <json>` | Append a routing rule | OK, ERR |
+| `UPDATE-RULE <tenant_id> <index> <json>` | Replace a rule at an index | OK, ERR |
+| `DELETE-RULE <tenant_id> <index>` | Remove a rule by index | OK, ERR |
+| `STATUS <tenant_id>` | Daemon status (registered tenants, counts) | STATUS, ERR |
 
 ### Responses (daemon → client on command connections)
 
@@ -107,13 +107,13 @@ Activated when the browser spawns it (no CLI arguments or a `chrome-extension://
 
 The extension never sends or knows its own tenant ID — the native messaging host adds it transparently.
 
-If the daemon disconnects, the client reconnects with exponential backoff.
+If the daemon connection drops, the push fiber exits and the bridge notifies the extension of the disconnect.
 
 ### CLI mode
 
 Activated when invoked with arguments. Connects to the daemon, sends the command using `default` as the tenant ID, prints the response, and exits.
 
-Available CLI commands: `open <url>`, `open-on <tenant> <url>`, `test <url>`, `get-config`, `status`.
+Available CLI commands: `open <url>`, `open-on <tenant> <url>`, `test <url>`, `get-config`, `set-config <json-file>`, `add-rule <json>`, `update-rule <index> <json>`, `delete-rule <index>`, `status`.
 
 ## Browser Extension
 
