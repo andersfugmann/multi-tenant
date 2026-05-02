@@ -2,6 +2,6 @@
 Type=Application
 Name=URL Router
 Comment=Route URLs to the correct tenant browser
-Exec=url-router open %U
+Exec=url-router-client open %U
 MimeType=x-scheme-handler/http;x-scheme-handler/https;
 NoDisplay=true

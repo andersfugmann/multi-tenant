@@ -1,9 +1,9 @@
 [Unit]
-Description=URL Router Daemon (%i)
+Description=URL Router Daemon
 Documentation=https://github.com/afu/multi-tenant
 
 [Service]
-ExecStart=/usr/bin/url-router daemon --tenant %i
+ExecStart=/usr/bin/url-router daemon
 Restart=on-failure
 RestartSec=3
 

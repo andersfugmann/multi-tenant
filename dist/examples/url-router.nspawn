@@ -5,16 +5,16 @@
 #
 # Requirements:
 #   - Container must NOT use private user namespaces (omit --private-users
-#     or use --private-users=no), since both daemons need matching UIDs
-#     to access each other's sockets.
-#   - The url-router package must be installed inside the container.
+#     or use --private-users=no), since the container's browser extension
+#     must access the host's socket.
 #   - The url-router-extension package must be installed inside the
 #     container if a browser runs there.
+#   - The tenant key in config.json must match the container's hostname.
 
 [Files]
-# Shared socket directory — both daemons create and access sockets here.
-# The host's tmpfiles.d creates this directory at boot.
+# Shared socket — the host daemon creates the socket here.
+# Containers connect to it via url-router-client.
 Bind=/run/url-router
 
-# Shared config — writable so both tenants can use add-rule.
-Bind=/etc/url-router/config.json
+# Shared config — readable so the extension can display tenant info.
+BindReadOnly=/etc/url-router/config.json

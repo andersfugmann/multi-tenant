@@ -1,9 +1,8 @@
 {
+  "socket": "/run/url-router/url-router.sock",
   "tenants": {
-    "host": {
-      "name": "Personal",
+    "mydesktop": {
       "browser_cmd": "xdg-open",
-      "socket": "/run/url-router/host.sock",
       "badge_label": "P",
       "badge_color": "#4285f4"
     }
@@ -13,6 +12,7 @@
     "unmatched": "local",
     "notifications": true,
     "notification_timeout_ms": 3000,
-    "cooldown_secs": 5
+    "cooldown_secs": 5,
+    "browser_launch_timeout_secs": 15
   }
 }
