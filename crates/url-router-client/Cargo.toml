@@ -1,6 +1,6 @@
 [package]
-name = "url-router-native-host"
-description = "Chrome native messaging host bridge for url-router"
+name = "url-router-client"
+description = "Chrome native messaging host bridge and CLI client for url-router"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,6 +10,13 @@ url-router-protocol = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[[bin]]
+name = "url-router-client"
+path = "src/main.rs"
 
 [package.metadata.deb]
 name = "url-router-extension"
@@ -17,7 +24,7 @@ maintainer = "URL Router Contributors"
 section = "net"
 depends = "url-router"
 assets = [
-    ["target/release/url-router-native-host", "usr/bin/", "755"],
+    ["target/release/url-router-client", "usr/bin/", "755"],
     ["../../dist/native-messaging-hosts/com.url_router.json", "etc/chromium/native-messaging-hosts/", "644"],
     ["../../dist/native-messaging-hosts/com.url_router.json", "etc/opt/edge/native-messaging-hosts/", "644"],
     ["../../dist/browser-policies/url-router-extension.json", "etc/chromium/policies/managed/", "644"],

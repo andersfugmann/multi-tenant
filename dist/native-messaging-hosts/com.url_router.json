@@ -1,7 +1,7 @@
 {
   "name": "com.url_router",
   "description": "URL Router native messaging host",
-  "path": "/usr/bin/url-router-native-host",
+  "path": "/usr/bin/url-router-client",
   "type": "stdio",
   "allowed_origins": [
     "chrome-extension://URL_ROUTER_EXTENSION_ID/"

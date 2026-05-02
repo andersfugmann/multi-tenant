@@ -65,8 +65,8 @@ clean-extension:
 
 install: build ## Install binaries and config to DESTDIR/PREFIX
 	install -Dm755 $(RELEASE_DIR)/url-router          $(DESTDIR)$(PREFIX)/bin/url-router
-	install -Dm755 $(RELEASE_DIR)/url-router-native-host $(DESTDIR)$(PREFIX)/bin/url-router-native-host
-	install -Dm644 dist/systemd/url-router@.service    $(DESTDIR)/usr/lib/systemd/user/url-router@.service
+	install -Dm755 $(RELEASE_DIR)/url-router-client $(DESTDIR)$(PREFIX)/bin/url-router-client
+	install -Dm644 dist/systemd/url-router.service    $(DESTDIR)/usr/lib/systemd/user/url-router.service
 	install -Dm644 dist/systemd/url-router.tmpfiles    $(DESTDIR)/usr/lib/tmpfiles.d/url-router.conf
 	install -Dm644 dist/url-router.desktop             $(DESTDIR)/usr/share/applications/url-router.desktop
 	install -Dm644 dist/config/config.json             $(DESTDIR)/etc/url-router/config.json
@@ -87,7 +87,7 @@ deb-server: build-rust ## Build url-router .deb
 	$(CARGO) deb -p url-router --no-build
 
 deb-extension: build-rust build-extension ## Build url-router-extension .deb
-	$(CARGO) deb -p url-router-native-host --no-build
+	$(CARGO) deb -p url-router-client --no-build
 
 # ── Help ─────────────────────────────────────────────────────────────
 

@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
     "crates/url-router",
-    "crates/url-router-native-host",
+    "crates/url-router-client",
     "crates/url-router-protocol",
 ]
 
@@ -24,3 +24,7 @@ notify = "7"
 notify-rust = "4"
 
 url-router-protocol = { path = "crates/url-router-protocol" }
+
+[profile.release]
+strip = true
+debug = false
