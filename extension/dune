@@ -3,7 +3,9 @@
  (modes js)
  (libraries protocol js_of_ocaml js_of_ocaml-lwt lwt base yojson)
  (js_of_ocaml
-  (javascript_files chrome_api.js))
+  (javascript_files chrome_api.js)
+  (build_runtime_flags (:standard -w no-free-variables))
+  (flags (:standard --Werror)))
  (preprocess
   (pps js_of_ocaml-ppx lwt_ppx)))
 

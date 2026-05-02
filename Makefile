@@ -23,7 +23,8 @@ install:
 
 VERSION ?= 0.0.0
 
-deb: build
+deb:
+	dune build bin/server/main.exe bin/client/main.exe extension/main.bc.js
 	@mkdir -p _build/deb
 	# -- url-router (daemon) package
 	$(eval DEB_ROUTER := _build/deb/url-router_$(VERSION))
