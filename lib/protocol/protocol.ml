@@ -27,7 +27,7 @@ type defaults = {
 }
 [@@deriving yojson]
 
-(* Custom yojson for (string * tenant_config) list as a JSON object *)
+(* Serialize tenant map as a JSON object keyed by tenant ID *)
 let tenants_to_yojson (lst : (string * tenant_config) list) : Yojson.Safe.t =
   `Assoc
     (List.map lst ~f:(fun (k, v) -> (k, tenant_config_to_yojson v)))

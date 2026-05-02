@@ -75,7 +75,7 @@ let parse_cli (argv : string array) : cli_mode =
       \  --bridge\n";
     Stdlib.exit 1
 
-(* -- Format a response for human-readable CLI output *)
+(* Format response as human-readable CLI output *)
 
 let format_response : type a. a Protocol.command -> (a, string) Result.t -> string =
  fun cmd resp ->
