@@ -306,12 +306,9 @@
   <div class="app">
     <header>
       <h1>🔀 URL Router</h1>
-      <div style="display:flex; align-items:center; gap:12px;">
-        <div class="status-badge">
-          <span class="dot" id="statusDot"></span>
-          <span id="statusText">Connecting…</span>
-        </div>
-        <button class="btn btn-sm" onclick="chrome.tabs.getCurrent(function(t){chrome.tabs.remove(t.id)})">✕ Close</button>
+      <div class="status-badge">
+        <span class="dot" id="statusDot"></span>
+        <span id="statusText">Connecting…</span>
       </div>
     </header>
 
