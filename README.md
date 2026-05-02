@@ -6,76 +6,62 @@ A multi-tenant URL routing system for Linux desktops. Routes URLs to the correct
 
 A single daemon runs on the host and listens on a shared Unix socket. Browser extensions in each tenant (host or container) connect to this socket through a native messaging bridge. When a URL is opened, the daemon evaluates routing rules and either keeps it in the current browser (`LOCAL`) or pushes it to the correct tenant's browser (`REMOTE`).
 
-```
-┌────────────────────────────────────────────────────────────┐
-│                          Host                              │
-│                                                            │
-│  ┌──────────────┐         ┌──────────────────────┐         │
-│  │   Browser     │◄──────►│  url-router-client   │         │
-│  │  (extension)  │  JSON  │  (native messaging)  │         │
-│  └──────────────┘         └──────────┬───────────┘         │
-│                                      │                     │
-│                              register│+ commands           │
-│                                      │                     │
-│                           ┌──────────▼───────────┐         │
-│                           │    url-router        │         │
-│                           │    (daemon)          │         │
-│                           │                      │         │
-│                           │  ┌────────────────┐  │         │
-│                           │  │  Coordinator   │  │         │
-│                           │  │  (routes URLs, │  │         │
-│                           │  │   pushes to    │  │         │
-│                           │  │   tenants)     │  │         │
-│                           │  └────────────────┘  │         │
-│                           └──────────▲───────────┘         │
-│                                      │                     │
-│ ┌────────────────────────────────────┼──────────────────┐  │
-│ │           Container (nspawn)       │                  │  │
-│ │                                    │                  │  │
-│ │  ┌──────────────┐     ┌────────────┴───────────┐      │  │
-│ │  │   Browser     │◄──►│  url-router-client     │      │  │
-│ │  │  (extension)  │    │  (native messaging)    │      │  │
-│ │  └──────────────┘    └────────────────────────┘      │  │
-│ └───────────────────────────────────────────────────────┘  │
-└────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph Host
+        B1[Browser<br>+ Extension] <-->|JSON| C1[url-router-client<br>native messaging]
+        C1 -->|register + commands| D[url-router daemon<br>Coordinator]
+        D -->|NAVIGATE| C1
 
-      Communication: Unix socket at /run/url-router/url-router.sock
-      (bind-mounted into containers)
+        subgraph Container [Container - nspawn]
+            B2[Browser<br>+ Extension] <-->|JSON| C2[url-router-client<br>native messaging]
+        end
+
+        C2 -->|register + commands| D
+        D -->|NAVIGATE| C2
+    end
+
+    D ---|Unix socket<br>/run/url-router/url-router.sock<br>bind-mounted into containers| D
 ```
 
 ### Routing Flow
 
-```
-  Browser navigates to URL
-           │
-           ▼
-  Extension intercepts ──► url-router-client ──► Daemon
-           │                (new connection)     evaluates
-           │                                     rules
-           │                          ┌──────────┴──────────┐
-           │                          │                     │
-           ▼                          ▼                     ▼
-       LOCAL                      REMOTE                  ERR
-    (keep tab)              (push NAVIGATE            (show error,
-                             to target tenant,         keep tab)
-                             close tab)
+```mermaid
+flowchart TD
+    A[Browser navigates to URL] --> B[Extension intercepts]
+    B --> C[url-router-client<br>new connection]
+    C --> D[Daemon evaluates rules]
+    D --> LOCAL
+    D --> REMOTE
+    D --> ERR
+
+    LOCAL -.- L[Keep tab]
+    REMOTE -.- R[Push NAVIGATE to<br>target tenant,<br>close tab]
+    ERR -.- E[Show error,<br>keep tab]
 ```
 
 ### Connection Model
 
 Each `url-router-client` maintains two types of connections to the daemon:
 
-```
-  url-router-client                          url-router daemon
-  ─────────────────                          ─────────────────
-  Listener connection ─── register myhost ──►┐
-       (long-lived)   ◄── NAVIGATE <url> ────┤  Coordinator
-                                             │  (single thread,
-  Command connection  ─── open myhost <url> ─┤   no locks)
-    (one-shot, per    ◄── REMOTE work ───────┤
-     command)                                │
-                                             │
-  Another client      ─── open work <url> ──►┘
+```mermaid
+sequenceDiagram
+    participant C as url-router-client
+    participant D as url-router daemon<br>(Coordinator)
+
+    Note over C,D: Listener connection (long-lived)
+    C->>D: register myhost
+    D->>C: OK
+    D-->>C: NAVIGATE https://...
+    D-->>C: NAVIGATE https://...
+
+    Note over C,D: Command connection (one-shot)
+    C->>D: open myhost https://...
+    D->>C: REMOTE work
+
+    Note over C,D: Another client's command
+    C->>D: open work https://...
+    D->>C: LOCAL
 ```
 
 - **Listener connection**: sends `register <hostname>`, then reads `NAVIGATE <url>` pushes
@@ -266,44 +252,30 @@ The included `url-router.desktop` file allows setting url-router as the system's
 
 ### Components
 
-```
-┌─────────────────────────────┐
-│     url-router-protocol     │  Shared library crate
-│  (types, config, protocol,  │  No I/O — pure parsing
-│   matching)                 │  and validation
-└──────────────┬──────────────┘
-               │
-       ┌───────┴────────┐
-       │                │
-┌──────▼──────┐  ┌──────▼──────────┐
-│  url-router │  │ url-router-     │
-│  (daemon)   │  │ client          │
-│             │  │                 │
-│ Coordinator │  │ Native msg mode │
-│ Server      │  │ CLI mode        │
-│ Config I/O  │  │ Framing         │
-│ Browser     │  │ Translation     │
-│ Launcher    │  │                 │
-└─────────────┘  └─────────────────┘
+```mermaid
+graph TD
+    P[url-router-protocol<br><i>shared library crate</i><br>types · config · protocol · matching<br>No I/O — pure parsing and validation]
+
+    P --> D[url-router<br><i>daemon</i><br>Coordinator · Server<br>Config I/O · Browser Launcher]
+    P --> C[url-router-client<br><i>native messaging + CLI</i><br>Framing · Translation<br>Bridge · CLI mode]
 ```
 
 ### Daemon Internals
 
 The daemon uses a **single-threaded coordinator** pattern — all mutable state (tenant registry, cooldown map, config, pending browser launches) is owned by one thread with no locks:
 
-```
-  Accept loop (main thread)
-       │
-       │ spawn per connection
-       ▼
-  Connection thread ──── mpsc::channel ────► Coordinator thread
-       │                                     (owns all state)
-       ◄──── oneshot::channel ◄──────────────┘
-       │
-  Write response, close
+```mermaid
+flowchart LR
+    subgraph Threads
+        A[Accept loop<br>main thread] -->|spawn per<br>connection| CT[Connection<br>thread]
+        CW[Config watcher<br>thread]
+        TT[Timer thread]
+    end
 
-  Config watcher thread ── ConfigReloaded ──► Coordinator
-  Timer thread ─────────── LaunchTimeout ───► Coordinator
+    CT -->|"mpsc::channel<br>(Command + oneshot)"| CO[Coordinator thread<br>owns all state]
+    CO -->|oneshot::channel| CT
+    CW -->|ConfigReloaded| CO
+    TT -->|LaunchTimeout| CO
 ```
 
 Communication uses `std::sync::mpsc` channels. Each command carries a oneshot response channel. No `Mutex`, `RwLock`, or `Condvar` anywhere — the architecture is inherently thread-safe by design.
