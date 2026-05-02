@@ -63,11 +63,11 @@ let load_config (path : string) : (Protocol.config, string) Result.t =
         Protocol.config_of_yojson json)
   | false ->
     let config = default_config () in
-    eprintf "[url-router] no config found, creating default at %s\n%!" path;
+    printf "[url-router] no config found, creating default at %s\n%!" path;
     (try
        save_config_to_path path config
      with exn ->
-       eprintf "[url-router] warning: could not write default config: %s\n%!"
+       printf "[url-router] warning: could not write default config: %s\n%!"
          (Exn.to_string exn));
     Ok config
 
@@ -88,9 +88,9 @@ let config_watcher config_path (inbox : coordinator_msg Eio.Stream.t) clock =
        (match load_config config_path with
         | Ok new_config ->
           Eio.Stream.add inbox (Update_config new_config);
-          eprintf "[url-router] config reloaded\n%!"
+          printf "[url-router] config reloaded\n%!"
         | Error msg ->
-          eprintf "[url-router] config reload failed: %s\n%!" msg);
+          printf "[url-router] config reload failed: %s\n%!" msg);
        loop current_mtime)
   in
   loop (config_mtime config_path)
@@ -113,7 +113,7 @@ let evaluate_rules (rules : Protocol.rule list) (url : string)
          | true ->
            (match compile_regex rule.pattern with
             | Error msg ->
-              eprintf "[url-router] rule %d: %s\n%!" i msg;
+              printf "[url-router] rule %d: %s\n%!" i msg;
               None
             | Ok regex ->
               (match Re.execp regex url with
@@ -315,9 +315,14 @@ let dispatch_command :
 
 let dispatch_line (state : state) (line : string) : state * string =
   match Protocol.deserialize_server_command line with
-  | Error msg -> (state, Printf.sprintf "ERR %s" msg)
+  | Error msg ->
+    let resp = Printf.sprintf "ERR %s" msg in
+    printf "[url-router] req: %s\n[url-router] res: %s\n%!" line resp;
+    (state, resp)
   | Ok (Server_command { tenant; command }) ->
-    dispatch_command state tenant command
+    let (state, resp) = dispatch_command state tenant command in
+    printf "[url-router] req[%s]: %s\n[url-router] res[%s]: %s\n%!" tenant line tenant resp;
+    (state, resp)
 
 let rec coordinator_loop (state : state) (inbox : coordinator_msg Eio.Stream.t) : unit =
   let msg = Eio.Stream.take inbox in
@@ -331,17 +336,19 @@ let rec coordinator_loop (state : state) (inbox : coordinator_msg Eio.Stream.t) 
       (match Map.mem state.registry tenant with
        | true ->
          Eio.Promise.resolve reply (Error "tenant already registered");
+         printf "[url-router] tenant %s register rejected (already registered)\n%!" tenant;
          state
        | false ->
          let registry = Map.set state.registry ~key:tenant ~data:push_stream in
          Eio.Promise.resolve reply (Ok ());
-         eprintf "[url-router] tenant %s registered\n%!" tenant;
+         printf "[url-router] tenant %s registered\n%!" tenant;
          { state with registry })
     | Unregister_tenant { tenant } ->
       let registry = Map.remove state.registry tenant in
-      eprintf "[url-router] tenant %s unregistered\n%!" tenant;
+      printf "[url-router] tenant %s unregistered\n%!" tenant;
       { state with registry }
     | Update_config config ->
+      printf "[url-router] config reloaded from disk\n%!";
       { state with config }
   in
   coordinator_loop state inbox
@@ -386,10 +393,14 @@ let handle_connection (inbox : coordinator_msg Eio.Stream.t) flow =
   match Eio.Buf_read.line reader with
   | exception (End_of_file | Eio.Io _) -> ()
   | line ->
+    printf "[url-router] req: %s\n%!" line;
     (match Protocol.deserialize_server_command line with
      | Error msg ->
-       Eio.Flow.copy_string (Printf.sprintf "ERR %s\n" msg) flow
+       let resp = Printf.sprintf "ERR %s" msg in
+       printf "[url-router] res: %s\n%!" resp;
+       Eio.Flow.copy_string (resp ^ "\n") flow
      | Ok (Server_command { tenant; command = Register }) ->
+       printf "[url-router] res[%s]: registering\n%!" tenant;
        handle_register inbox tenant flow reader
      | Ok (Server_command _) ->
        let (promise, reply) = Eio.Promise.create () in
@@ -415,7 +426,7 @@ let () =
     match load_config config_path with
     | Ok c -> c
     | Error msg ->
-      eprintf "[url-router] fatal: %s\n%!" msg;
+      printf "[url-router] fatal: %s\n%!" msg;
       Stdlib.exit 1
   in
   let initial_state =
@@ -438,7 +449,7 @@ let () =
   let listening =
     Eio.Net.listen ~sw ~backlog:128 net (`Unix socket_path)
   in
-  eprintf "[url-router] listening on %s\n%!" socket_path;
+  printf "[url-router] listening on %s\n%!" socket_path;
   Eio.Fiber.all [
     (fun () -> coordinator_loop initial_state inbox);
     (fun () -> config_watcher config_path inbox clock);
@@ -446,7 +457,7 @@ let () =
       let rec accept_loop () =
         Eio.Net.accept_fork ~sw listening
           ~on_error:(fun exn ->
-            eprintf "[url-router] connection error: %s\n%!"
+            printf "[url-router] connection error: %s\n%!"
               (Exn.to_string exn))
           (fun flow _addr -> handle_connection inbox flow);
         accept_loop ()
