@@ -1,7 +1,8 @@
 (executable
  (name main)
+ (modules main)
  (modes js)
- (libraries protocol js_of_ocaml js_of_ocaml-lwt lwt base yojson)
+ (libraries protocol js_of_ocaml js_of_ocaml-lwt lwt base stdio yojson)
  (js_of_ocaml
   (javascript_files chrome_api.js)
   (build_runtime_flags (:standard -w no-free-variables))
@@ -9,8 +10,44 @@
  (preprocess
   (pps js_of_ocaml-ppx lwt_ppx)))
 
+(executables
+ (names popup config_page options_page add_rule_page)
+ (modules popup config_page options_page add_rule_page page_util)
+ (modes js)
+ (libraries protocol js_of_ocaml base stdio yojson)
+ (js_of_ocaml
+  (javascript_files page_api.js)
+  (build_runtime_flags (:standard -w no-free-variables))
+  (flags (:standard --Werror -w no-free-variables)))
+ (preprocess
+  (pps js_of_ocaml-ppx)))
+
 (rule
  (target main.js)
  (deps main.bc.js)
  (action
   (copy main.bc.js main.js)))
+
+(rule
+ (target popup.js)
+ (deps popup.bc.js)
+ (action
+  (copy popup.bc.js popup.js)))
+
+(rule
+ (target config.js)
+ (deps config_page.bc.js)
+ (action
+  (copy config_page.bc.js config.js)))
+
+(rule
+ (target options.js)
+ (deps options_page.bc.js)
+ (action
+  (copy options_page.bc.js options.js)))
+
+(rule
+ (target add_rule.js)
+ (deps add_rule_page.bc.js)
+ (action
+  (copy add_rule_page.bc.js add_rule.js)))
