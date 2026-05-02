@@ -27,7 +27,11 @@
    (>= 1.0))
   (re
    (>= 1.0))
-  (alcotest
+  (ppx_expect
    (and
     :with-test
-    (>= 1.0)))))
+    (>= v0.17)))
+  (ppx_inline_test
+   (and
+    :with-test
+    (>= v0.17)))))

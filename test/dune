@@ -1,3 +1,0 @@
-(test
- (name test_protocol)
- (libraries protocol alcotest base stdio yojson))

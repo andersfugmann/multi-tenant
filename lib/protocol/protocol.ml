@@ -568,3 +568,386 @@ let bridge_message_of_yojson (json : Yojson.Safe.t) :
 
 (* Suppress unused open warnings — Stdio is used by convention *)
 let () = ignore (print_endline : string -> unit)
+
+(* ── Inline expect tests ─────────────────────────────────────────── *)
+
+let%expect_test "sample data" =
+  let _rule =
+    { pattern = ".*\\.example\\.com"; target = "work"; enabled = true }
+  in
+  let _tenant_cfg =
+    { browser_cmd = "chromium"; label = "Work"; color = "#0000ff" }
+  in
+  let _defaults =
+    { unmatched = "personal"; cooldown_seconds = 5; browser_launch_timeout = 10 }
+  in
+  [%expect {||}]
+
+(* ── Line protocol: server commands ─────────────────────────────── *)
+
+let%expect_test "line: serialize register" =
+  print_endline (serialize_server_command { tenant = "host"; command = Register });
+  [%expect {| REGISTER host |}]
+
+let%expect_test "line: serialize open" =
+  print_endline
+    (serialize_server_command
+       { tenant = "work"; command = Open "https://example.com" });
+  [%expect {| OPEN work https://example.com |}]
+
+let%expect_test "line: serialize open-on" =
+  print_endline
+    (serialize_server_command
+       { tenant = "host"; command = Open_on ("work", "https://example.com/page") });
+  [%expect {| OPEN-ON host work https://example.com/page |}]
+
+let%expect_test "line: serialize test" =
+  print_endline
+    (serialize_server_command { tenant = "work"; command = Test "https://test.com" });
+  [%expect {| TEST work https://test.com |}]
+
+let%expect_test "line: serialize get-config" =
+  print_endline (serialize_server_command { tenant = "host"; command = Get_config });
+  [%expect {| GET-CONFIG host |}]
+
+let%expect_test "line: serialize delete-rule" =
+  print_endline
+    (serialize_server_command { tenant = "host"; command = Delete_rule 3 });
+  [%expect {| DELETE-RULE host 3 |}]
+
+let%expect_test "line: serialize status" =
+  print_endline (serialize_server_command { tenant = "host"; command = Status });
+  [%expect {| STATUS host |}]
+
+let%expect_test "line: round-trip register" =
+  let line = serialize_server_command { tenant = "host"; command = Register } in
+  (match deserialize_server_command line with
+   | Ok (Server_command { tenant; command = Register }) ->
+     printf "tenant=%s cmd=Register\n" tenant
+   | _ -> print_endline "FAIL");
+  [%expect {| tenant=host cmd=Register |}]
+
+let%expect_test "line: round-trip open with spaces in url" =
+  let sc =
+    { tenant = "work"; command = Open "https://example.com/search?q=hello world" }
+  in
+  let line = serialize_server_command sc in
+  (match deserialize_server_command line with
+   | Ok (Server_command { tenant; command = Open url }) ->
+     printf "tenant=%s url=%s\n" tenant url
+   | _ -> print_endline "FAIL");
+  [%expect {| tenant=work url=https://example.com/search?q=hello world |}]
+
+let%expect_test "line: round-trip open_on" =
+  let sc =
+    { tenant = "host"; command = Open_on ("work", "https://example.com/page") }
+  in
+  let line = serialize_server_command sc in
+  (match deserialize_server_command line with
+   | Ok (Server_command { tenant; command = Open_on (target, url) }) ->
+     printf "tenant=%s target=%s url=%s\n" tenant target url
+   | _ -> print_endline "FAIL");
+  [%expect {| tenant=host target=work url=https://example.com/page |}]
+
+let sample_config =
+  {
+    socket = "/run/url-router.sock";
+    tenants =
+      [
+        ( "work",
+          { browser_cmd = "chromium --profile-directory=Work";
+            label = "Work";
+            color = "#0000ff" } );
+      ];
+    rules =
+      [ { pattern = ".*\\.example\\.com"; target = "work"; enabled = true } ];
+    defaults =
+      { unmatched = "personal"; cooldown_seconds = 5; browser_launch_timeout = 10 };
+  }
+
+let%expect_test "line: round-trip set_config" =
+  let line =
+    serialize_server_command { tenant = "host"; command = Set_config sample_config }
+  in
+  (match deserialize_server_command line with
+   | Ok (Server_command { tenant; command = Set_config cfg }) ->
+     printf "tenant=%s socket=%s rules=%d\n" tenant cfg.socket
+       (List.length cfg.rules)
+   | _ -> print_endline "FAIL");
+  [%expect {| tenant=host socket=/run/url-router.sock rules=1 |}]
+
+let sample_rule =
+  { pattern = ".*\\.example\\.com"; target = "work"; enabled = true }
+
+let%expect_test "line: round-trip add_rule" =
+  let line =
+    serialize_server_command { tenant = "host"; command = Add_rule sample_rule }
+  in
+  (match deserialize_server_command line with
+   | Ok (Server_command { tenant; command = Add_rule r }) ->
+     printf "tenant=%s pattern=%s target=%s enabled=%b\n" tenant r.pattern
+       r.target r.enabled
+   | _ -> print_endline "FAIL");
+  [%expect {| tenant=host pattern=.*\.example\.com target=work enabled=true |}]
+
+let%expect_test "line: round-trip update_rule" =
+  let line =
+    serialize_server_command
+      { tenant = "host"; command = Update_rule (2, sample_rule) }
+  in
+  (match deserialize_server_command line with
+   | Ok (Server_command { tenant; command = Update_rule (idx, r) }) ->
+     printf "tenant=%s idx=%d pattern=%s\n" tenant idx r.pattern
+   | _ -> print_endline "FAIL");
+  [%expect {| tenant=host idx=2 pattern=.*\.example\.com |}]
+
+let%expect_test "line: round-trip delete_rule" =
+  let line =
+    serialize_server_command { tenant = "host"; command = Delete_rule 3 }
+  in
+  (match deserialize_server_command line with
+   | Ok (Server_command { tenant; command = Delete_rule idx }) ->
+     printf "tenant=%s idx=%d\n" tenant idx
+   | _ -> print_endline "FAIL");
+  [%expect {| tenant=host idx=3 |}]
+
+(* ── Line protocol: responses ───────────────────────────────────── *)
+
+let%expect_test "line: response OK" =
+  print_endline (serialize_response Register (Ok ()));
+  [%expect {| OK |}]
+
+let%expect_test "line: response LOCAL" =
+  print_endline (serialize_response (Open "https://x.com") (Ok Local));
+  [%expect {| LOCAL |}]
+
+let%expect_test "line: response REMOTE" =
+  print_endline (serialize_response (Open "https://x.com") (Ok (Remote "work")));
+  [%expect {| REMOTE work |}]
+
+let%expect_test "line: response MATCH" =
+  print_endline
+    (serialize_response (Test "https://x.com")
+       (Ok (Match { tenant = "work"; rule_index = 1 })));
+  [%expect {| MATCH work 1 |}]
+
+let%expect_test "line: response NOMATCH" =
+  print_endline
+    (serialize_response (Test "https://x.com")
+       (Ok (No_match { default_tenant = "personal" })));
+  [%expect {| NOMATCH personal |}]
+
+let%expect_test "line: response ERR" =
+  print_endline (serialize_response Register (Error "something went wrong"));
+  [%expect {| ERR something went wrong |}]
+
+let%expect_test "line: round-trip response config" =
+  let cmd = Get_config in
+  let line = serialize_response cmd (Ok sample_config) in
+  (match deserialize_response cmd line with
+   | Ok (Ok cfg) ->
+     printf "socket=%s rules=%d\n" cfg.socket (List.length cfg.rules)
+   | _ -> print_endline "FAIL");
+  [%expect {| socket=/run/url-router.sock rules=1 |}]
+
+let sample_status =
+  { registered_tenants = [ "work"; "personal" ]; uptime_seconds = 3600 }
+
+let%expect_test "line: round-trip response status" =
+  let cmd = Status in
+  let line = serialize_response cmd (Ok sample_status) in
+  (match deserialize_response cmd line with
+   | Ok (Ok si) ->
+     printf "uptime=%d tenants=%d\n" si.uptime_seconds
+       (List.length si.registered_tenants)
+   | _ -> print_endline "FAIL");
+  [%expect {| uptime=3600 tenants=2 |}]
+
+let%expect_test "line: round-trip response err with special chars" =
+  let cmd = Register in
+  let line = serialize_response cmd (Error "fail: \"bad\" & <oops>") in
+  (match deserialize_response cmd line with
+   | Ok (Error msg) -> printf "err=%s\n" msg
+   | _ -> print_endline "FAIL");
+  [%expect {| err=fail: "bad" & <oops> |}]
+
+(* ── Line protocol: server push ─────────────────────────────────── *)
+
+let%expect_test "line: push navigate" =
+  print_endline (serialize_push (Navigate "https://example.com/path"));
+  [%expect {| NAVIGATE https://example.com/path |}]
+
+let%expect_test "line: round-trip push navigate with spaces" =
+  let line = serialize_push (Navigate "https://example.com/q=hello world") in
+  (match deserialize_push line with
+   | Ok (Push (Navigate url)) -> printf "url=%s\n" url
+   | _ -> print_endline "FAIL");
+  [%expect {| url=https://example.com/q=hello world |}]
+
+(* ── JSON: commands ─────────────────────────────────────────────── *)
+
+let%expect_test "json: round-trip register" =
+  let json = serialize_command_json Register in
+  print_endline (Yojson.Safe.to_string json);
+  (match deserialize_command_json json with
+   | Ok (Command Register) -> print_endline "OK"
+   | _ -> print_endline "FAIL");
+  [%expect {|
+    {"command":"register"}
+    OK |}]
+
+let%expect_test "json: round-trip open" =
+  let json = serialize_command_json (Open "https://example.com") in
+  print_endline (Yojson.Safe.to_string json);
+  (match deserialize_command_json json with
+   | Ok (Command (Open url)) -> printf "url=%s\n" url
+   | _ -> print_endline "FAIL");
+  [%expect {|
+    {"command":"open","url":"https://example.com"}
+    url=https://example.com |}]
+
+let%expect_test "json: round-trip open_on" =
+  let json = serialize_command_json (Open_on ("work", "https://example.com")) in
+  (match deserialize_command_json json with
+   | Ok (Command (Open_on (target, url))) ->
+     printf "target=%s url=%s\n" target url
+   | _ -> print_endline "FAIL");
+  [%expect {| target=work url=https://example.com |}]
+
+let%expect_test "json: round-trip test" =
+  let json = serialize_command_json (Test "https://example.com") in
+  (match deserialize_command_json json with
+   | Ok (Command (Test url)) -> printf "url=%s\n" url
+   | _ -> print_endline "FAIL");
+  [%expect {| url=https://example.com |}]
+
+let%expect_test "json: round-trip set_config" =
+  let json = serialize_command_json (Set_config sample_config) in
+  (match deserialize_command_json json with
+   | Ok (Command (Set_config cfg)) ->
+     printf "socket=%s\n" cfg.socket
+   | _ -> print_endline "FAIL");
+  [%expect {| socket=/run/url-router.sock |}]
+
+let%expect_test "json: round-trip add_rule" =
+  let json = serialize_command_json (Add_rule sample_rule) in
+  (match deserialize_command_json json with
+   | Ok (Command (Add_rule r)) -> printf "pattern=%s\n" r.pattern
+   | _ -> print_endline "FAIL");
+  [%expect {| pattern=.*\.example\.com |}]
+
+let%expect_test "json: round-trip update_rule" =
+  let json = serialize_command_json (Update_rule (5, sample_rule)) in
+  (match deserialize_command_json json with
+   | Ok (Command (Update_rule (idx, r))) ->
+     printf "idx=%d pattern=%s\n" idx r.pattern
+   | _ -> print_endline "FAIL");
+  [%expect {| idx=5 pattern=.*\.example\.com |}]
+
+let%expect_test "json: round-trip delete_rule" =
+  let json = serialize_command_json (Delete_rule 7) in
+  (match deserialize_command_json json with
+   | Ok (Command (Delete_rule idx)) -> printf "idx=%d\n" idx
+   | _ -> print_endline "FAIL");
+  [%expect {| idx=7 |}]
+
+(* ── JSON: responses ────────────────────────────────────────────── *)
+
+let%expect_test "json: response ok" =
+  let json = serialize_response_json Register (Ok ()) in
+  print_endline (Yojson.Safe.to_string json);
+  [%expect {| {"status":"ok"} |}]
+
+let%expect_test "json: response local" =
+  let json = serialize_response_json (Open "https://x.com") (Ok Local) in
+  print_endline (Yojson.Safe.to_string json);
+  [%expect {| {"status":"ok","result":["Local"]} |}]
+
+let%expect_test "json: response remote" =
+  let json =
+    serialize_response_json (Open "https://x.com") (Ok (Remote "work"))
+  in
+  print_endline (Yojson.Safe.to_string json);
+  [%expect {| {"status":"ok","result":["Remote","work"]} |}]
+
+let%expect_test "json: response match" =
+  let json =
+    serialize_response_json (Test "https://x.com")
+      (Ok (Match { tenant = "work"; rule_index = 2 }))
+  in
+  print_endline (Yojson.Safe.to_string json);
+  [%expect {| {"status":"ok","result":["Match",{"tenant":"work","rule_index":2}]} |}]
+
+let%expect_test "json: response nomatch" =
+  let json =
+    serialize_response_json (Test "https://x.com")
+      (Ok (No_match { default_tenant = "personal" }))
+  in
+  print_endline (Yojson.Safe.to_string json);
+  [%expect {| {"status":"ok","result":["No_match",{"default_tenant":"personal"}]} |}]
+
+let%expect_test "json: response error" =
+  let json = serialize_response_json Register (Error "bad request") in
+  print_endline (Yojson.Safe.to_string json);
+  [%expect {| {"status":"error","message":"bad request"} |}]
+
+let%expect_test "json: round-trip response config" =
+  let cmd = Get_config in
+  let json = serialize_response_json cmd (Ok sample_config) in
+  (match deserialize_response_json cmd json with
+   | Ok (Ok cfg) -> printf "socket=%s\n" cfg.socket
+   | _ -> print_endline "FAIL");
+  [%expect {| socket=/run/url-router.sock |}]
+
+let%expect_test "json: round-trip response status" =
+  let cmd = Status in
+  let json = serialize_response_json cmd (Ok sample_status) in
+  (match deserialize_response_json cmd json with
+   | Ok (Ok si) -> printf "uptime=%d\n" si.uptime_seconds
+   | _ -> print_endline "FAIL");
+  [%expect {| uptime=3600 |}]
+
+(* ── JSON: bridge messages ──────────────────────────────────────── *)
+
+let%expect_test "json: bridge push round-trip" =
+  let msg = Push (Push (Navigate "https://example.com")) in
+  let json = bridge_message_to_yojson msg in
+  print_endline (Yojson.Safe.to_string json);
+  (match bridge_message_of_yojson json with
+   | Ok (Push (Push (Navigate url))) -> printf "url=%s\n" url
+   | _ -> print_endline "FAIL");
+  [%expect {|
+    {"type":"push","push_type":"navigate","url":"https://example.com"}
+    url=https://example.com |}]
+
+let%expect_test "json: bridge response round-trip" =
+  let data = `Assoc [ ("status", `String "ok") ] in
+  let msg = Response data in
+  let json = bridge_message_to_yojson msg in
+  (match bridge_message_of_yojson json with
+   | Ok (Response d) -> print_endline (Yojson.Safe.to_string d)
+   | _ -> print_endline "FAIL");
+  [%expect {| {"status":"ok"} |}]
+
+(* ── Error handling ─────────────────────────────────────────────── *)
+
+let%expect_test "deserialize: invalid json string" =
+  (match parse_json_string "not valid json{" with
+   | Error msg -> printf "error=%s\n" msg
+   | Ok _ -> print_endline "UNEXPECTED OK");
+  [%expect {|
+    error=invalid JSON: Line 1, bytes 0-15:
+    Invalid token 'not valid json{'
+    |}]
+
+let%expect_test "deserialize: unknown command" =
+  (match deserialize_server_command "BOGUS host" with
+   | Error msg -> printf "error=%s\n" msg
+   | Ok _ -> print_endline "UNEXPECTED OK");
+  [%expect {| error=unknown command: BOGUS |}]
+
+let%expect_test "deserialize: empty line" =
+  (match deserialize_server_command "" with
+   | Error msg -> printf "error=%s\n" msg
+   | Ok _ -> print_endline "UNEXPECTED OK");
+  [%expect {| error=expected at least 2 fields |}]

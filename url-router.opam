@@ -12,7 +12,8 @@ depends: [
   "eio" {>= "1.0"}
   "eio_main" {>= "1.0"}
   "re" {>= "1.0"}
-  "alcotest" {with-test & >= "1.0"}
+  "ppx_expect" {with-test & >= "v0.17"}
+  "ppx_inline_test" {with-test & >= "v0.17"}
   "odoc" {with-doc}
 ]
 build: [
