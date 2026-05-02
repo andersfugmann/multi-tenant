@@ -132,10 +132,10 @@ function renderRules(): void {
 function createTenantSelect(selectedTenant: string): HTMLSelectElement {
   const select = document.createElement("select");
   if (!config) return select;
-  Object.entries(config.tenants).forEach(([id, tenant]) => {
+  Object.keys(config.tenants).forEach((id) => {
     const opt = document.createElement("option");
     opt.value = id;
-    opt.textContent = tenant.name;
+    opt.textContent = id;
     if (id === selectedTenant) opt.selected = true;
     select.appendChild(opt);
   });
@@ -182,9 +182,7 @@ function renderTenants(): void {
     const grid = document.createElement("div");
     grid.className = "tenant-grid";
 
-    grid.appendChild(createField("Name", tenant.name, (v) => { tenant.name = v; }));
     grid.appendChild(createField("Browser command", tenant.browser_cmd, (v) => { tenant.browser_cmd = v; }));
-    grid.appendChild(createField("Socket path", tenant.socket, (v) => { tenant.socket = v; }));
     grid.appendChild(createField("Badge label", tenant.badge_label ?? "", (v) => { tenant.badge_label = v || null; }));
     grid.appendChild(createField("Badge color", tenant.badge_color ?? "", (v) => { tenant.badge_color = v || null; }));
 
@@ -209,9 +207,7 @@ function renderTenants(): void {
       return;
     }
     config.tenants[id] = {
-      name: id.charAt(0).toUpperCase() + id.slice(1),
       browser_cmd: "xdg-open",
-      socket: `/run/url-router/${id}.sock`,
       badge_label: id.charAt(0).toUpperCase(),
       badge_color: "#666666",
     };
@@ -240,21 +236,25 @@ function createField(label: string, value: string, onChange: (v: string) => void
 
 function renderDefaults(): void {
   if (!config) return;
-  const defaults = config.defaults ?? { unmatched: "local", notifications: true, notification_timeout_ms: 3000, cooldown_secs: 5 };
+  const defaults = config.defaults ?? { unmatched: "local", notifications: true, notification_timeout_ms: 3000, cooldown_secs: 5, browser_launch_timeout_secs: 15 };
 
+  (document.getElementById("def-socket") as HTMLInputElement).value = config.socket;
   (document.getElementById("def-unmatched") as HTMLInputElement).value = defaults.unmatched;
   (document.getElementById("def-notifications") as HTMLInputElement).checked = defaults.notifications;
   (document.getElementById("def-notif-timeout") as HTMLInputElement).value = String(defaults.notification_timeout_ms);
   (document.getElementById("def-cooldown") as HTMLInputElement).value = String(defaults.cooldown_secs);
+  (document.getElementById("def-launch-timeout") as HTMLInputElement).value = String(defaults.browser_launch_timeout_secs);
 
   const saveBtn = document.getElementById("save-defaults-btn") as HTMLButtonElement;
   saveBtn.onclick = () => {
     if (!config) return;
+    config.socket = (document.getElementById("def-socket") as HTMLInputElement).value;
     config.defaults = {
       unmatched: (document.getElementById("def-unmatched") as HTMLInputElement).value,
       notifications: (document.getElementById("def-notifications") as HTMLInputElement).checked,
       notification_timeout_ms: parseInt((document.getElementById("def-notif-timeout") as HTMLInputElement).value, 10) || 3000,
       cooldown_secs: parseInt((document.getElementById("def-cooldown") as HTMLInputElement).value, 10) || 5,
+      browser_launch_timeout_secs: parseInt((document.getElementById("def-launch-timeout") as HTMLInputElement).value, 10) || 15,
     };
     saveConfig();
   };

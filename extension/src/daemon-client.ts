@@ -2,15 +2,17 @@
  * Typed wrapper for daemon communication via Chrome native messaging.
  *
  * All communication with the native messaging host goes through this module.
- * Handles port lifecycle, message sending, and response parsing.
+ * Handles port lifecycle, message sending, response parsing, and unsolicited
+ * NAVIGATE messages from the daemon.
  */
 
 import {
   type DaemonCommand,
   type DaemonResponse,
+  type DaemonMessage,
   type Config,
   ConfigSchema,
-  parseDaemonResponse,
+  parseDaemonMessage,
 } from "./protocol.js";
 
 const NATIVE_HOST_NAME = "com.url_router";
@@ -24,12 +26,14 @@ type PendingRequest = {
  * Client for communicating with the url-router daemon via native messaging.
  *
  * Maintains a persistent native messaging port. Requests are queued and
- * resolved in order (the protocol is strictly request-response).
+ * resolved in order. Unsolicited NAVIGATE messages are routed to registered
+ * listeners instead of the request queue.
  */
 export class DaemonClient {
   private port: chrome.runtime.Port | null = null;
   private queue: PendingRequest[] = [];
   private disconnectListeners: Array<() => void> = [];
+  private navigateListeners: Array<(url: string) => void> = [];
 
   /** Connect to the native messaging host. */
   connect(): void {
@@ -38,16 +42,29 @@ export class DaemonClient {
     this.port = chrome.runtime.connectNative(NATIVE_HOST_NAME);
 
     this.port.onMessage.addListener((msg: unknown) => {
-      const pending = this.queue.shift();
-      if (pending) {
-        try {
-          const response = parseDaemonResponse(msg);
-          pending.resolve(response);
-        } catch (e) {
+      let message: DaemonMessage;
+      try {
+        message = parseDaemonMessage(msg);
+      } catch {
+        const pending = this.queue.shift();
+        if (pending) {
           pending.reject(
-            new Error(`invalid daemon response: ${JSON.stringify(msg)}`)
+            new Error(`invalid daemon message: ${JSON.stringify(msg)}`)
           );
         }
+        return;
+      }
+
+      if (message.status === "NAVIGATE") {
+        for (const listener of this.navigateListeners) {
+          listener(message.url);
+        }
+        return;
+      }
+
+      const pending = this.queue.shift();
+      if (pending) {
+        pending.resolve(message);
       }
     });
 
@@ -67,6 +84,11 @@ export class DaemonClient {
   /** Register a callback for when the port disconnects. */
   onDisconnect(listener: () => void): void {
     this.disconnectListeners.push(listener);
+  }
+
+  /** Register a callback for unsolicited NAVIGATE messages from the daemon. */
+  onNavigate(listener: (url: string) => void): void {
+    this.navigateListeners.push(listener);
   }
 
   /** Send a command and return the response. */

@@ -22,11 +22,11 @@ function createTenantSubmenus(
   parentId: string,
   contexts: [chrome.contextMenus.ContextType, ...chrome.contextMenus.ContextType[]]
 ): void {
-  Object.entries(config.tenants).forEach(([tenantId, tenant]) => {
+  Object.keys(config.tenants).forEach((tenantId) => {
     chrome.contextMenus.create({
       id: `${prefix}${tenantId}`,
       parentId,
-      title: tenant.name,
+      title: tenantId,
       contexts,
     });
   });

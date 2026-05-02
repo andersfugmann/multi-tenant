@@ -59,7 +59,7 @@ function createTenantButton(
 ): HTMLButtonElement {
   const btn = document.createElement("button");
   btn.className = "tenant-btn";
-  btn.textContent = `Open in ${tenant.name}`;
+  btn.textContent = `Open in ${tenantId}`;
   if (tenant.badge_color) {
     btn.style.borderLeft = `4px solid ${tenant.badge_color}`;
   }
@@ -73,7 +73,7 @@ function createTenantButton(
     } catch {
       btn.textContent = "Failed";
       setTimeout(() => {
-        btn.textContent = `Open in ${tenant.name}`;
+        btn.textContent = `Open in ${tenantId}`;
         btn.disabled = false;
       }, 2000);
     }
@@ -87,10 +87,10 @@ async function handleRemember(url: string, config: Config): Promise<void> {
   const container = document.getElementById("remember-section") as HTMLElement;
   container.innerHTML = "<p>Remember for which tenant?</p>";
 
-  for (const [tenantId, tenant] of Object.entries(config.tenants)) {
+  for (const tenantId of Object.keys(config.tenants)) {
     const btn = document.createElement("button");
     btn.className = "tenant-btn remember-choice";
-    btn.textContent = tenant.name;
+    btn.textContent = tenantId;
 
     btn.addEventListener("click", async () => {
       const origin = new URL(url).origin;
@@ -102,7 +102,7 @@ async function handleRemember(url: string, config: Config): Promise<void> {
           pattern,
           tenant: tenantId,
         });
-        showMessage(`Rule added: ${origin} → ${tenant.name}`);
+        showMessage(`Rule added: ${origin} → ${tenantId}`);
       } catch {
         showMessage("Failed to add rule");
       }

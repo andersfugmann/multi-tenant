@@ -18,10 +18,6 @@ const RemoteResponseSchema = z.object({
   tenant: z.string(),
 });
 
-const FallbackResponseSchema = z.object({
-  status: z.literal("FALLBACK"),
-});
-
 const OkResponseSchema = z.object({
   status: z.literal("OK"),
   detail: z.string().optional(),
@@ -56,7 +52,6 @@ const ErrorResponseSchema = z.object({
 export const DaemonResponseSchema = z.discriminatedUnion("status", [
   LocalResponseSchema,
   RemoteResponseSchema,
-  FallbackResponseSchema,
   OkResponseSchema,
   MatchResponseSchema,
   NoMatchResponseSchema,
@@ -67,12 +62,35 @@ export const DaemonResponseSchema = z.discriminatedUnion("status", [
 
 export type DaemonResponse = z.infer<typeof DaemonResponseSchema>;
 
+// --- Server-pushed messages ---
+
+const NavigateMessageSchema = z.object({
+  status: z.literal("NAVIGATE"),
+  url: z.string(),
+});
+
+export type NavigateMessage = z.infer<typeof NavigateMessageSchema>;
+
+// --- All daemon messages (responses + server pushes) ---
+
+export const DaemonMessageSchema = z.discriminatedUnion("status", [
+  LocalResponseSchema,
+  RemoteResponseSchema,
+  OkResponseSchema,
+  MatchResponseSchema,
+  NoMatchResponseSchema,
+  ConfigResponseSchema,
+  StatusResponseSchema,
+  ErrorResponseSchema,
+  NavigateMessageSchema,
+]);
+
+export type DaemonMessage = DaemonResponse | NavigateMessage;
+
 // --- Config schemas (parsed from CONFIG response) ---
 
 const TenantSchema = z.object({
-  name: z.string(),
   browser_cmd: z.string(),
-  socket: z.string(),
   badge_label: z.string().nullable().optional(),
   badge_color: z.string().nullable().optional(),
 });
@@ -89,9 +107,11 @@ const DefaultsSchema = z.object({
   notifications: z.boolean().default(true),
   notification_timeout_ms: z.number().default(3000),
   cooldown_secs: z.number().default(5),
+  browser_launch_timeout_secs: z.number().default(15),
 });
 
 export const ConfigSchema = z.object({
+  socket: z.string(),
   tenants: z.record(z.string(), TenantSchema),
   rules: z.array(RuleSchema),
   defaults: DefaultsSchema.optional(),
@@ -133,4 +153,8 @@ export type DaemonCommand =
 
 export function parseDaemonResponse(raw: unknown): DaemonResponse {
   return DaemonResponseSchema.parse(raw);
+}
+
+export function parseDaemonMessage(raw: unknown): DaemonMessage {
+  return DaemonMessageSchema.parse(raw);
 }

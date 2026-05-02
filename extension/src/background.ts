@@ -6,7 +6,8 @@
  * 2. Intercepts navigations via webNavigation.onBeforeNavigate
  * 3. Sends `open <url>` to the daemon for routing decisions
  * 4. Kills tabs on REMOTE responses
- * 5. Updates the toolbar badge with tenant ownership info
+ * 5. Opens new tabs on NAVIGATE server pushes
+ * 6. Updates the toolbar badge with tenant ownership info
  */
 
 import { DaemonClient } from "./daemon-client.js";
@@ -27,6 +28,10 @@ async function initialize(): Promise<void> {
       client.connect();
       loadConfig().catch(() => {});
     }, 1000);
+  });
+
+  client.onNavigate((url: string) => {
+    chrome.tabs.create({ url });
   });
 
   await loadConfig();
@@ -74,7 +79,6 @@ chrome.webNavigation.onBeforeNavigate.addListener(
             killTab(tabId);
             break;
           case "LOCAL":
-          case "FALLBACK":
             break;
           case "ERR":
             console.error("url-router: routing error:", response.message);

@@ -52,10 +52,10 @@ async function initAssign(): Promise<void> {
   }
 
   const select = document.getElementById("tenant-select") as HTMLSelectElement;
-  for (const [tenantId, tenant] of Object.entries(config.tenants)) {
+  for (const tenantId of Object.keys(config.tenants)) {
     const option = document.createElement("option");
     option.value = tenantId;
-    option.textContent = tenant.name;
+    option.textContent = tenantId;
     select.appendChild(option);
   }
 
