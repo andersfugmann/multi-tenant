@@ -1,201 +1,87 @@
-//! Config file I/O — reading, writing, and watching.
+//! Configuration file I/O and watching.
 //!
-//! Uses `url_router_protocol::config` for parsing. This module handles
-//! the file system operations: reading from disk, writing with flock,
-//! and watching for changes with inotify.
+//! Reads configuration from disk using `url_router_protocol::config` for
+//! parsing, and watches for file changes using the `notify` crate to trigger
+//! live reloads.
 
-use std::fs;
-use std::path::Path;
-use std::sync::{Arc, RwLock};
+use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 
-use tracing::{error, info};
-use url_router_protocol::config::{Config, Rule};
+use notify::{EventKind, RecursiveMode, Watcher};
+use thiserror::Error;
+use url_router_protocol::config::{Config, ConfigError};
 
-/// Read and parse the config file from disk.
-pub fn load_config(path: &str) -> Result<Config, ConfigIoError> {
-    let content = fs::read_to_string(path).map_err(ConfigIoError::Read)?;
-    Config::from_json(&content).map_err(ConfigIoError::Parse)
+use crate::coordinator::CoordinatorMessage;
+
+/// Errors from config I/O operations.
+#[derive(Debug, Error)]
+pub enum ConfigIoError {
+    #[error("failed to read config file: {0}")]
+    Read(#[from] std::io::Error),
+
+    #[error("failed to parse config: {0}")]
+    Parse(#[from] ConfigError),
+
+    #[error("failed to set up file watcher: {0}")]
+    Watch(#[from] notify::Error),
 }
 
-/// Append a rule to the config file using file locking.
+/// Read and parse configuration from a file.
+pub fn read_config(path: &Path) -> Result<Config, ConfigIoError> {
+    let content = std::fs::read_to_string(path)?;
+    let config = Config::from_json(&content)?;
+    Ok(config)
+}
+
+/// Watch a config file for changes and send `ConfigReloaded` messages to the coordinator.
 ///
-/// Reads the current config, appends the rule, and writes it back
-/// while holding an exclusive flock to prevent concurrent writes.
-pub fn add_rule(config_path: &str, rule: Rule) -> Result<(), ConfigIoError> {
-    modify_config(config_path, |config| {
-        config.rules.push(rule);
-        Ok(())
-    })
-}
-
-/// Replace a rule at the given index.
-pub fn update_rule(config_path: &str, index: usize, rule: Rule) -> Result<(), ConfigIoError> {
-    modify_config(config_path, |config| {
-        if index >= config.rules.len() {
-            return Err(ConfigIoError::IndexOutOfBounds {
-                index,
-                len: config.rules.len(),
-            });
-        }
-        config.rules[index] = rule;
-        Ok(())
-    })
-}
-
-/// Delete a rule at the given index.
-pub fn delete_rule(config_path: &str, index: usize) -> Result<(), ConfigIoError> {
-    modify_config(config_path, |config| {
-        if index >= config.rules.len() {
-            return Err(ConfigIoError::IndexOutOfBounds {
-                index,
-                len: config.rules.len(),
-            });
-        }
-        config.rules.remove(index);
-        Ok(())
-    })
-}
-
-/// Replace the entire config file.
-pub fn set_config(config_path: &str, new_config: Config) -> Result<(), ConfigIoError> {
-    use std::io::Write;
-    use std::os::unix::io::AsRawFd;
-
-    let mut file = fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(config_path)
-        .map_err(ConfigIoError::Read)?;
-
-    let fd = file.as_raw_fd();
-    let ret = unsafe { libc::flock(fd, libc::LOCK_EX) };
-    if ret != 0 {
-        return Err(ConfigIoError::Lock(std::io::Error::last_os_error()));
-    }
-
-    let json = new_config
-        .to_json_pretty()
-        .map_err(ConfigIoError::Serialize)?;
-    file.set_len(0).map_err(ConfigIoError::Write)?;
-    file.write_all(json.as_bytes())
-        .map_err(ConfigIoError::Write)?;
-
-    Ok(())
-}
-
-/// Read-modify-write the config file under an exclusive flock.
-fn modify_config(
-    config_path: &str,
-    mutate: impl FnOnce(&mut Config) -> Result<(), ConfigIoError>,
+/// This function blocks forever, monitoring the file for modifications. When
+/// the file changes, it re-reads and re-parses the config, forwarding
+/// successful parses to the coordinator. Parse errors are logged as warnings.
+///
+/// Watches the parent directory to handle editors that write-and-rename.
+pub fn watch_config(
+    path: PathBuf,
+    coordinator_tx: mpsc::Sender<CoordinatorMessage>,
 ) -> Result<(), ConfigIoError> {
-    use std::io::{Read, Seek, Write};
-    use std::os::unix::io::AsRawFd;
+    let (tx, rx) = mpsc::channel();
 
-    let mut file = fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(config_path)
-        .map_err(ConfigIoError::Read)?;
-
-    // Acquire exclusive lock
-    let fd = file.as_raw_fd();
-    let ret = unsafe { libc::flock(fd, libc::LOCK_EX) };
-    if ret != 0 {
-        return Err(ConfigIoError::Lock(std::io::Error::last_os_error()));
-    }
-
-    // Read current config via the locked file handle
-    let mut content = String::new();
-    file.read_to_string(&mut content)
-        .map_err(ConfigIoError::Read)?;
-    let mut config = Config::from_json(&content).map_err(ConfigIoError::Parse)?;
-
-    // Apply mutation
-    mutate(&mut config)?;
-
-    // Write back via the locked file handle
-    let json = config.to_json_pretty().map_err(ConfigIoError::Serialize)?;
-    file.seek(std::io::SeekFrom::Start(0))
-        .map_err(ConfigIoError::Write)?;
-    file.set_len(0).map_err(ConfigIoError::Write)?;
-    file.write_all(json.as_bytes())
-        .map_err(ConfigIoError::Write)?;
-
-    // Lock released when file is dropped
-    Ok(())
-}
-
-/// Start a config watcher thread that reloads config on file changes.
-///
-/// Uses the `notify` crate (inotify on Linux) to watch for modifications.
-/// Updates the shared config state when the file changes.
-pub fn watch_config(config_path: String, config: Arc<RwLock<Config>>) -> Result<(), ConfigIoError> {
-    use notify::{Event, EventKind, RecursiveMode, Watcher};
-    use std::sync::mpsc;
-
-    let (tx, rx) = mpsc::channel::<notify::Result<Event>>();
-
-    let mut watcher =
-        notify::recommended_watcher(tx).map_err(|e| ConfigIoError::Watch(e.to_string()))?;
-
-    // Watch the parent directory (inotify needs the directory for renamed files)
-    let parent = Path::new(&config_path).parent().unwrap_or(Path::new("."));
-
-    watcher
-        .watch(parent, RecursiveMode::NonRecursive)
-        .map_err(|e| ConfigIoError::Watch(e.to_string()))?;
-
-    let config_path_clone = config_path.clone();
-    std::thread::spawn(move || {
-        // Keep watcher alive
-        let _watcher = watcher;
-
-        for event in rx {
-            match event {
-                Ok(Event {
-                    kind: EventKind::Modify(_) | EventKind::Create(_),
-                    ..
-                }) => {
-                    reload_config(&config_path_clone, &config);
-                }
-                Err(e) => {
-                    error!(error = %e, "config watcher error");
-                }
-                _ => {}
+    let mut watcher = notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
+        if let Ok(event) = result {
+            if matches!(
+                event.kind,
+                EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_)
+            ) {
+                let _ = tx.send(());
             }
         }
-    });
+    })?;
 
-    Ok(())
-}
+    // Watch the parent directory to catch atomic rename patterns
+    let watch_dir = path.parent().unwrap_or(Path::new("."));
+    watcher.watch(watch_dir, RecursiveMode::NonRecursive)?;
 
-fn reload_config(path: &str, config: &Arc<RwLock<Config>>) {
-    match load_config(path) {
-        Ok(new_config) => {
-            let mut guard = config.write().unwrap();
-            *guard = new_config;
-            info!(path = path, "config reloaded");
+    tracing::info!(path = %path.display(), "watching config file for changes");
+
+    for () in rx.iter() {
+        // Debounce: drain any queued events
+        while rx.try_recv().is_ok() {}
+
+        if !path.exists() {
+            tracing::warn!(path = %path.display(), "config file removed");
+            continue;
         }
-        Err(e) => {
-            error!(path = path, error = %e, "failed to reload config");
+
+        match read_config(&path) {
+            Ok(config) => {
+                tracing::info!(path = %path.display(), "config reloaded");
+                let _ = coordinator_tx.send(CoordinatorMessage::ConfigReloaded { config });
+            }
+            Err(error) => {
+                tracing::warn!(%error, path = %path.display(), "failed to reload config");
+            }
         }
     }
-}
 
-#[derive(Debug, thiserror::Error)]
-pub enum ConfigIoError {
-    #[error("failed to read config: {0}")]
-    Read(std::io::Error),
-    #[error("failed to parse config: {0}")]
-    Parse(serde_json::Error),
-    #[error("failed to serialize config: {0}")]
-    Serialize(serde_json::Error),
-    #[error("failed to write config: {0}")]
-    Write(std::io::Error),
-    #[error("failed to lock config: {0}")]
-    Lock(std::io::Error),
-    #[error("rule index {index} out of bounds (have {len} rules)")]
-    IndexOutOfBounds { index: usize, len: usize },
-    #[error("failed to watch config: {0}")]
-    Watch(String),
+    Ok(())
 }

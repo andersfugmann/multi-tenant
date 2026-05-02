@@ -1,22 +1,15 @@
-//! Logging initialization for the url-router daemon and CLI.
+//! Tracing subscriber initialization.
 //!
-//! Configures the `tracing` subscriber with configurable verbosity
-//! and journal-compatible output format.
+//! Sets up structured logging via the `tracing` crate with an env-filter
+//! controlled by the `RUST_LOG` environment variable (defaults to `info`).
 
 use tracing_subscriber::EnvFilter;
 
-/// Initialize the tracing subscriber with the given log level.
+/// Initialize the global tracing subscriber.
 ///
-/// The level can be overridden by the `RUST_LOG` environment variable.
-/// If neither is set, defaults to `info`.
-pub fn init(level: Option<&str>) {
-    let default_level = level.unwrap_or("info");
-    let filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_level));
-
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_target(false)
-        .compact()
-        .init();
+/// Uses `RUST_LOG` environment variable for filtering (defaults to `info`).
+/// Must be called once at program start.
+pub fn init() {
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    tracing_subscriber::fmt().with_env_filter(filter).init();
 }

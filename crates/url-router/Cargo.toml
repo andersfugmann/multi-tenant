@@ -25,7 +25,7 @@ section = "net"
 depends = "$auto"
 assets = [
     ["target/release/url-router", "usr/bin/", "755"],
-    ["../../dist/systemd/url-router@.service", "usr/lib/systemd/user/", "644"],
+    ["../../dist/systemd/url-router.service", "usr/lib/systemd/user/", "644"],
     ["../../dist/systemd/url-router.tmpfiles", "usr/lib/tmpfiles.d/url-router.conf", "644"],
     ["../../dist/url-router.desktop", "usr/share/applications/", "644"],
     ["../../dist/config/config.json", "usr/share/url-router/examples/", "644"],

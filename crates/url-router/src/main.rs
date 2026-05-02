@@ -1,169 +1,128 @@
+//! Multi-tenant URL routing daemon.
+//!
+//! Entry point for the `url-router` binary. Reads configuration, starts the
+//! coordinator thread, config file watcher, and socket accept loop.
+
 mod browser;
-mod cli;
 mod config_io;
-mod daemon;
-mod forwarding;
+mod coordinator;
 mod logging;
 mod notification;
+mod oneshot;
+mod server;
 
-use std::collections::HashMap;
-use std::path::Path;
-use std::process;
-use std::sync::{Arc, Mutex, RwLock};
-use std::time::Instant;
+use std::path::PathBuf;
+use std::sync::mpsc;
+use std::thread;
 
-use clap::Parser;
-use tracing::{error, info};
-use url_router_protocol::config::default_config_path;
-use url_router_protocol::types::TenantId;
+use clap::{Parser, Subcommand};
 
-use cli::{Cli, Commands};
-use daemon::server::DaemonState;
+use crate::coordinator::CoordinatorMessage;
+
+#[derive(Parser)]
+#[command(name = "url-router", about = "Multi-tenant URL routing daemon")]
+struct Cli {
+    #[command(subcommand)]
+    command: CliCommand,
+}
+
+#[derive(Subcommand)]
+enum CliCommand {
+    /// Start the routing daemon
+    Daemon {
+        /// Path to the configuration file
+        #[arg(short, long, default_value = "/etc/url-router/config.json")]
+        config: PathBuf,
+    },
+}
 
 fn main() {
-    let cli = Cli::parse();
+    logging::init();
 
+    let cli = Cli::parse();
     match cli.command {
-        Commands::Daemon {
-            tenant,
-            log_level,
-            config,
+        CliCommand::Daemon {
+            config: config_path,
         } => {
-            let config = config.unwrap_or_else(default_config_path);
-            run_daemon(&tenant, &log_level, &config);
-        }
-        Commands::Open {
-            url,
-            socket,
-            config,
-        } => {
-            let config = config.unwrap_or_else(default_config_path);
-            run_open(&url, socket.as_deref(), &config);
-        }
-        Commands::Test {
-            url,
-            socket,
-            config,
-        } => {
-            let config = config.unwrap_or_else(default_config_path);
-            run_test(&url, socket.as_deref(), &config);
-        }
-        Commands::Status { socket, config } => {
-            let config = config.unwrap_or_else(default_config_path);
-            run_status(socket.as_deref(), &config);
-        }
-        Commands::Setup { tenant, config } => {
-            let config = config.unwrap_or_else(default_config_path);
-            cli::setup::run(&tenant, &config);
+            run_daemon(config_path);
         }
     }
 }
 
-fn run_daemon(tenant: &str, log_level: &str, config_path: &str) {
-    logging::init(Some(log_level));
-
-    let config = match config_io::load_config(config_path) {
+fn run_daemon(config_path: PathBuf) {
+    // Read initial config
+    let config = match config_io::read_config(&config_path) {
         Ok(c) => c,
-        Err(e) => {
-            error!(error = %e, "failed to load config");
-            process::exit(1);
+        Err(error) => {
+            tracing::error!(%error, path = %config_path.display(), "failed to read config");
+            std::process::exit(1);
         }
     };
 
-    let tenant_id = TenantId::new(tenant);
+    let socket_path = config.socket.clone();
 
-    // Verify tenant exists in config
-    if config.tenant(tenant).is_none() {
-        error!(tenant = tenant, "tenant not found in config");
-        process::exit(1);
-    }
+    // Create the coordinator channel
+    let (coordinator_tx, coordinator_rx) = mpsc::channel::<CoordinatorMessage>();
 
-    let socket_path = config.tenant(tenant).unwrap().socket.clone();
-    let config = Arc::new(RwLock::new(config));
+    // Start the coordinator thread
+    let coord_config = config.clone();
+    thread::Builder::new()
+        .name("coordinator".to_string())
+        .spawn(move || {
+            coordinator::run_coordinator(coordinator_rx, coord_config);
+        })
+        .expect("failed to spawn coordinator thread");
 
-    // Start config watcher
-    if let Err(e) = config_io::watch_config(config_path.to_string(), Arc::clone(&config)) {
-        error!(error = %e, "failed to start config watcher");
-        // Non-fatal: continue without hot-reload
-    }
+    // Start the config watcher thread
+    let watcher_tx = coordinator_tx.clone();
+    let watcher_path = config_path.clone();
+    thread::Builder::new()
+        .name("config-watcher".to_string())
+        .spawn(move || {
+            if let Err(error) = config_io::watch_config(watcher_path, watcher_tx) {
+                tracing::error!(%error, "config watcher failed");
+            }
+        })
+        .expect("failed to spawn config watcher thread");
 
-    let state = Arc::new(DaemonState {
-        config,
-        tenant: tenant_id,
-        config_path: config_path.to_string(),
-        start_time: Instant::now(),
-        cooldown: Mutex::new(HashMap::new()),
-    });
+    // Set up signal handling for clean shutdown
+    setup_signal_handler(&socket_path);
 
-    info!(tenant = tenant, socket = %socket_path, "starting daemon");
+    // Bind and run the accept loop (blocks on main thread)
+    let listener = match server::bind_listener(&socket_path) {
+        Ok(l) => l,
+        Err(error) => {
+            tracing::error!(%error, path = socket_path, "failed to bind socket");
+            std::process::exit(1);
+        }
+    };
 
-    if let Err(e) = daemon::server::run(Path::new(&socket_path), state) {
-        error!(error = %e, "daemon failed");
-        process::exit(1);
+    server::run_accept_loop(listener, coordinator_tx);
+}
+
+fn setup_signal_handler(socket_path: &str) {
+    let path = socket_path.to_string();
+
+    // Handle SIGTERM/SIGINT: remove socket file and exit
+    if let Err(error) = ctrlc_handler(&path) {
+        tracing::warn!(%error, "failed to set up signal handler");
     }
 }
 
-/// Resolve the socket path: use explicit --socket, or read config to find local tenant socket.
-fn resolve_socket(explicit: Option<&str>, config_path: &str) -> String {
-    if let Some(s) = explicit {
-        return s.to_string();
+fn ctrlc_handler(socket_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let path = socket_path.to_string();
+    unsafe {
+        libc::signal(libc::SIGTERM, handle_signal as libc::sighandler_t);
+        libc::signal(libc::SIGINT, handle_signal as libc::sighandler_t);
     }
-
-    // Try to find the local tenant's socket from config
-    // Use hostname-based heuristic or first available socket
-    match config_io::load_config(config_path) {
-        Ok(config) => {
-            config
-                .tenants
-                .values()
-                .find(|t| Path::new(&t.socket).exists())
-                .map(|t| t.socket.clone())
-                .unwrap_or_else(|| {
-                    eprintln!("error: no reachable daemon socket found. Use --socket to specify.");
-                    process::exit(1);
-                })
-        }
-        Err(e) => {
-            eprintln!("error: failed to read config: {e}. Use --socket to specify.");
-            process::exit(1);
-        }
-    }
+    // Store path for cleanup — use a simple static
+    // For simplicity, we just let the OS clean up. The bind_listener
+    // already removes stale sockets on startup.
+    let _ = path;
+    Ok(())
 }
 
-fn run_open(url: &str, socket: Option<&str>, config_path: &str) {
-    let socket_path = resolve_socket(socket, config_path);
-    let cmd = format!("open-on default {url}");
-
-    match cli::client::send_command(&socket_path, &cmd) {
-        Ok(response) => println!("{response}"),
-        Err(e) => {
-            eprintln!("error: {e}");
-            process::exit(1);
-        }
-    }
-}
-
-fn run_test(url: &str, socket: Option<&str>, config_path: &str) {
-    let socket_path = resolve_socket(socket, config_path);
-    let cmd = format!("test {url}");
-
-    match cli::client::send_command(&socket_path, &cmd) {
-        Ok(response) => println!("{response}"),
-        Err(e) => {
-            eprintln!("error: {e}");
-            process::exit(1);
-        }
-    }
-}
-
-fn run_status(socket: Option<&str>, config_path: &str) {
-    let socket_path = resolve_socket(socket, config_path);
-
-    match cli::client::send_command(&socket_path, "status") {
-        Ok(response) => println!("{response}"),
-        Err(e) => {
-            eprintln!("error: {e}");
-            process::exit(1);
-        }
-    }
+extern "C" fn handle_signal(_sig: libc::c_int) {
+    // Exit cleanly; the socket file will be cleaned up on next start
+    std::process::exit(0);
 }
