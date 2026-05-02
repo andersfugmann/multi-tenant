@@ -196,15 +196,13 @@ let handle_navigation (url : string) (_tab_id : int) (frame_id : int)
               Protocol.deserialize_response_json (Open url)
                 response_json
             with
-            | Ok (Ok Local) -> ()
-            | Ok (Ok (Remote tid)) ->
+            | Ok Local -> ()
+            | Ok (Remote tid) ->
               log
                 (Printf.sprintf "URL %s routed to remote tenant %s"
                    url tid)
-            | Ok (Error msg) ->
-              log (Printf.sprintf "Open error: %s" msg)
             | Error msg ->
-              log (Printf.sprintf "Protocol error: %s" msg))))
+              log (Printf.sprintf "Open error: %s" msg))))
   | _ -> ()
 
 (* -- Context menus *)

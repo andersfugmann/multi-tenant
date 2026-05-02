@@ -82,10 +82,6 @@ type _ command =
   | Delete_rule : int -> unit command
   | Status : status_info command
 
-(* -- Type-safe response *)
-
-type 'a response = ('a, string) Result.t
-
 (* -- Server push *)
 
 type _ server_push = Navigate : url -> url server_push
@@ -188,7 +184,7 @@ let deserialize_server_command (line : string) :
 
 (* -- Line protocol: responses *)
 
-let serialize_response : type a. a command -> a response -> string =
+let serialize_response : type a. a command -> (a, string) Result.t -> string =
  fun cmd resp ->
   match resp with
   | Error msg -> Printf.sprintf "ERR %s" msg
@@ -221,33 +217,32 @@ let serialize_response : type a. a command -> a response -> string =
          (status_info_to_yojson value |> Yojson.Safe.to_string))
 
 let deserialize_response :
-    type a. a command -> string -> (a response, string) Result.t =
+    type a. a command -> string -> (a, string) Result.t =
  fun cmd line ->
   match String.lsplit2 line ~on:' ' with
   | None ->
-    (* single-word responses *)
     (match line with
      | "OK" ->
        (match cmd with
-        | Register -> Ok (Ok ())
-        | Set_config _ -> Ok (Ok ())
-        | Add_rule _ -> Ok (Ok ())
-        | Update_rule _ -> Ok (Ok ())
-        | Delete_rule _ -> Ok (Ok ())
+        | Register -> Ok ()
+        | Set_config _ -> Ok ()
+        | Add_rule _ -> Ok ()
+        | Update_rule _ -> Ok ()
+        | Delete_rule _ -> Ok ()
         | _ -> Error "unexpected OK for this command")
      | "LOCAL" ->
        (match cmd with
-        | Open _ -> Ok (Ok Local)
-        | Open_on _ -> Ok (Ok Local)
+        | Open _ -> Ok Local
+        | Open_on _ -> Ok Local
         | _ -> Error "unexpected LOCAL for this command")
      | other -> Error (Printf.sprintf "unrecognized response: %s" other))
   | Some (keyword, rest) ->
     (match keyword with
-     | "ERR" -> Ok (Error rest)
+     | "ERR" -> Error rest
      | "REMOTE" ->
        (match cmd with
-        | Open _ -> Ok (Ok (Remote rest))
-        | Open_on _ -> Ok (Ok (Remote rest))
+        | Open _ -> Ok (Remote rest)
+        | Open_on _ -> Ok (Remote rest)
         | _ -> Error "unexpected REMOTE for this command")
      | "MATCH" ->
        (match cmd with
@@ -257,25 +252,25 @@ let deserialize_response :
             Int.of_string_opt idx_str
             |> Result.of_option ~error:"MATCH: invalid index"
           in
-          Ok (Ok (Match { tenant = tid; rule_index = idx }))
+          Ok (Match { tenant = tid; rule_index = idx })
         | _ -> Error "unexpected MATCH for this command")
      | "NOMATCH" ->
        (match cmd with
-        | Test _ -> Ok (Ok (No_match { default_tenant = rest }))
+        | Test _ -> Ok (No_match { default_tenant = rest })
         | _ -> Error "unexpected NOMATCH for this command")
      | "CONFIG" ->
        (match cmd with
         | Get_config ->
           let* json = parse_json_string rest in
           let* cfg = config_of_yojson json in
-          Ok (Ok cfg)
+          Ok cfg
         | _ -> Error "unexpected CONFIG for this command")
      | "STATUS" ->
        (match cmd with
         | Status ->
           let* json = parse_json_string rest in
           let* si = status_info_of_yojson json in
-          Ok (Ok si)
+          Ok si
         | _ -> Error "unexpected STATUS for this command")
      | other ->
        Error (Printf.sprintf "unrecognized response keyword: %s" other))
@@ -396,7 +391,7 @@ let deserialize_command_json (json : Yojson.Safe.t) :
 (* -- JSON serialization: responses *)
 
 let serialize_response_json :
-    type a. a command -> a response -> Yojson.Safe.t =
+    type a. a command -> (a, string) Result.t -> Yojson.Safe.t =
  fun cmd resp ->
   match resp with
   | Error msg ->
@@ -445,56 +440,41 @@ let serialize_response_json :
          ])
 
 let deserialize_response_json :
-    type a. a command -> Yojson.Safe.t -> (a response, string) Result.t =
+    type a. a command -> Yojson.Safe.t -> (a, string) Result.t =
  fun cmd json ->
   match string_field json "status" with
   | Error e -> Error e
   | Ok "error" ->
     (match string_field json "message" with
-     | Ok msg -> Ok (Error msg)
+     | Ok msg -> Error msg
      | Error e -> Error e)
   | Ok "ok" ->
     (match cmd with
-     | Register -> Ok (Ok ())
+     | Register -> Ok ()
      | Open _ ->
        (match assoc_field json "result" with
         | Error e -> Error e
-        | Ok rj ->
-          (match route_result_of_yojson rj with
-           | Ok r -> Ok (Ok r)
-           | Error e -> Error e))
+        | Ok rj -> route_result_of_yojson rj)
      | Open_on _ ->
        (match assoc_field json "result" with
         | Error e -> Error e
-        | Ok rj ->
-          (match route_result_of_yojson rj with
-           | Ok r -> Ok (Ok r)
-           | Error e -> Error e))
+        | Ok rj -> route_result_of_yojson rj)
      | Test _ ->
        (match assoc_field json "result" with
         | Error e -> Error e
-        | Ok rj ->
-          (match test_result_of_yojson rj with
-           | Ok r -> Ok (Ok r)
-           | Error e -> Error e))
+        | Ok rj -> test_result_of_yojson rj)
      | Get_config ->
        (match assoc_field json "config" with
         | Error e -> Error e
-        | Ok cj ->
-          (match config_of_yojson cj with
-           | Ok c -> Ok (Ok c)
-           | Error e -> Error e))
-     | Set_config _ -> Ok (Ok ())
-     | Add_rule _ -> Ok (Ok ())
-     | Update_rule _ -> Ok (Ok ())
-     | Delete_rule _ -> Ok (Ok ())
+        | Ok cj -> config_of_yojson cj)
+     | Set_config _ -> Ok ()
+     | Add_rule _ -> Ok ()
+     | Update_rule _ -> Ok ()
+     | Delete_rule _ -> Ok ()
      | Status ->
        (match assoc_field json "status_info" with
         | Error e -> Error e
-        | Ok sj ->
-          (match status_info_of_yojson sj with
-           | Ok s -> Ok (Ok s)
-           | Error e -> Error e)))
+        | Ok sj -> status_info_of_yojson sj))
   | Ok other ->
     Error (Printf.sprintf "unknown status: %s" other)
 
@@ -715,7 +695,7 @@ let%expect_test "line: round-trip response config" =
   let cmd = Get_config in
   let line = serialize_response cmd (Ok sample_config) in
   (match deserialize_response cmd line with
-   | Ok (Ok cfg) ->
+   | Ok cfg ->
      printf "socket=%s rules=%d\n" cfg.socket (List.length cfg.rules)
    | _ -> print_endline "FAIL");
   [%expect {| socket=/run/url-router.sock rules=1 |}]
@@ -727,7 +707,7 @@ let%expect_test "line: round-trip response status" =
   let cmd = Status in
   let line = serialize_response cmd (Ok sample_status) in
   (match deserialize_response cmd line with
-   | Ok (Ok si) ->
+   | Ok si ->
      printf "uptime=%d tenants=%d\n" si.uptime_seconds
        (List.length si.registered_tenants)
    | _ -> print_endline "FAIL");
@@ -737,7 +717,7 @@ let%expect_test "line: round-trip response err with special chars" =
   let cmd = Register in
   let line = serialize_response cmd (Error "fail: \"bad\" & <oops>") in
   (match deserialize_response cmd line with
-   | Ok (Error msg) -> printf "err=%s\n" msg
+   | Error msg -> printf "err=%s\n" msg
    | _ -> print_endline "FAIL");
   [%expect {| err=fail: "bad" & <oops> |}]
 
@@ -865,7 +845,7 @@ let%expect_test "json: round-trip response config" =
   let cmd = Get_config in
   let json = serialize_response_json cmd (Ok sample_config) in
   (match deserialize_response_json cmd json with
-   | Ok (Ok cfg) -> printf "socket=%s\n" cfg.socket
+   | Ok cfg -> printf "socket=%s\n" cfg.socket
    | _ -> print_endline "FAIL");
   [%expect {| socket=/run/url-router.sock |}]
 
@@ -873,7 +853,7 @@ let%expect_test "json: round-trip response status" =
   let cmd = Status in
   let json = serialize_response_json cmd (Ok sample_status) in
   (match deserialize_response_json cmd json with
-   | Ok (Ok si) -> printf "uptime=%d\n" si.uptime_seconds
+   | Ok si -> printf "uptime=%d\n" si.uptime_seconds
    | _ -> print_endline "FAIL");
   [%expect {| uptime=3600 |}]
 

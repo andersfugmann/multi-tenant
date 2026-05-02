@@ -66,10 +66,6 @@ type _ command =
   | Delete_rule : int -> unit command
   | Status : status_info command
 
-(** {1 Type-safe response} *)
-
-type 'a response = ('a, string) Result.t
-
 (** {1 Server push} *)
 
 type _ server_push = Navigate : url -> url server_push
@@ -90,10 +86,10 @@ type packed_server_command =
 val serialize_server_command : 'a server_command -> string
 val deserialize_server_command : string -> (packed_server_command, string) Result.t
 
-(** {1 Line protocol — responses} *)
+(** {1 Line protocol -- responses} *)
 
-val serialize_response : 'a command -> 'a response -> string
-val deserialize_response : 'a command -> string -> ('a response, string) Result.t
+val serialize_response : 'a command -> ('a, string) Result.t -> string
+val deserialize_response : 'a command -> string -> ('a, string) Result.t
 
 (** {1 Line protocol — server push} *)
 
@@ -105,12 +101,12 @@ val deserialize_push : string -> (packed_server_push, string) Result.t
 val serialize_command_json : 'a command -> Yojson.Safe.t
 val deserialize_command_json : Yojson.Safe.t -> (packed_command, string) Result.t
 
-(** {1 JSON serialization — responses} *)
+(** {1 JSON serialization -- responses} *)
 
-val serialize_response_json : 'a command -> 'a response -> Yojson.Safe.t
+val serialize_response_json : 'a command -> ('a, string) Result.t -> Yojson.Safe.t
 
 val deserialize_response_json :
-  'a command -> Yojson.Safe.t -> ('a response, string) Result.t
+  'a command -> Yojson.Safe.t -> ('a, string) Result.t
 
 (** {1 JSON helpers} *)
 

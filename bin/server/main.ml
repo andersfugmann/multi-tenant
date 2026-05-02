@@ -117,7 +117,7 @@ let push_navigate (state : state) (target : string) (url : string) :
 (* -- Command handlers *)
 
 let handle_open (state : state) (tenant : string) (url : string) :
-    Protocol.route_result Protocol.response =
+    (Protocol.route_result, string) Result.t =
   let config = !(state.config) in
   let target, _idx =
     evaluate_rules config.rules url config.defaults.unmatched
@@ -145,13 +145,13 @@ let handle_open (state : state) (tenant : string) (url : string) :
            | Error msg -> Error msg)))
 
 let handle_open_on (state : state) (target : string) (url : string) :
-    Protocol.route_result Protocol.response =
+    (Protocol.route_result, string) Result.t =
   match push_navigate state target url with
   | Ok () -> Ok (Remote target)
   | Error msg -> Error msg
 
 let handle_test (state : state) (url : string) :
-    Protocol.test_result Protocol.response =
+    (Protocol.test_result, string) Result.t =
   let config = !(state.config) in
   let target, idx =
     evaluate_rules config.rules url config.defaults.unmatched
@@ -161,7 +161,7 @@ let handle_test (state : state) (url : string) :
   | None -> Ok (No_match { default_tenant = target })
 
 let handle_status (state : state) :
-    Protocol.status_info Protocol.response =
+    (Protocol.status_info, string) Result.t =
   let tenants = Map.keys !(state.registry) in
   let uptime =
     Unix.gettimeofday () -. state.start_time |> Float.to_int
@@ -169,7 +169,7 @@ let handle_status (state : state) :
   Ok { registered_tenants = tenants; uptime_seconds = uptime }
 
 let handle_set_config (state : state) (cfg : Protocol.config) :
-    unit Protocol.response =
+    (unit, string) Result.t =
   state.config := cfg;
   (try
      save_config state;
@@ -178,7 +178,7 @@ let handle_set_config (state : state) (cfg : Protocol.config) :
      Error (Printf.sprintf "failed to save config: %s" (Exn.to_string exn)))
 
 let handle_add_rule (state : state) (rule : Protocol.rule) :
-    unit Protocol.response =
+    (unit, string) Result.t =
   match compile_regex rule.pattern with
   | Error msg -> Error msg
   | Ok _ ->
@@ -191,7 +191,7 @@ let handle_add_rule (state : state) (rule : Protocol.rule) :
        Error (Printf.sprintf "failed to save config: %s" (Exn.to_string exn)))
 
 let handle_update_rule (state : state) (idx : int) (rule : Protocol.rule) :
-    unit Protocol.response =
+    (unit, string) Result.t =
   match compile_regex rule.pattern with
   | Error msg -> Error msg
   | Ok _ ->
@@ -214,7 +214,7 @@ let handle_update_rule (state : state) (idx : int) (rule : Protocol.rule) :
          (Printf.sprintf "failed to save config: %s" (Exn.to_string exn)))
 
 let handle_delete_rule (state : state) (idx : int) :
-    unit Protocol.response =
+    (unit, string) Result.t =
   let config = !(state.config) in
   let len = List.length config.rules in
   match idx >= 0 && idx < len with
@@ -237,7 +237,7 @@ let handle_delete_rule (state : state) (idx : int) :
 let dispatch_command :
     type a. state -> Protocol.tenant_id -> a Protocol.command -> string =
  fun state tenant cmd ->
-  let (response : a Protocol.response) =
+  let (response : (a, string) Result.t) =
     match cmd with
     | Protocol.Register -> Error "unexpected REGISTER in command mode"
     | Protocol.Open url -> handle_open state tenant url

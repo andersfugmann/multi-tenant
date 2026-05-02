@@ -77,7 +77,7 @@ let parse_cli (argv : string array) : cli_mode =
 
 (* -- Format a response for human-readable CLI output *)
 
-let format_response : type a. a Protocol.command -> a Protocol.response -> string =
+let format_response : type a. a Protocol.command -> (a, string) Result.t -> string =
  fun cmd resp ->
   match resp with
   | Error msg -> Printf.sprintf "Error: %s" msg
@@ -129,9 +129,8 @@ let send_command_cli :
   Eio.Flow.copy_string (line ^ "\n") flow;
   let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
   let response_line = Eio.Buf_read.line reader in
-  match Protocol.deserialize_response cmd response_line with
-  | Ok resp -> format_response cmd resp
-  | Error msg -> Printf.sprintf "Protocol error: %s" msg
+  Protocol.deserialize_response cmd response_line
+  |> format_response cmd
 
 (* -- CLI register: stay connected, print pushes *)
 
@@ -150,12 +149,9 @@ let run_register ~net =
   let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
   let first_line = Eio.Buf_read.line reader in
   (match Protocol.deserialize_response Register first_line with
-   | Ok (Ok ()) -> printf "Registered as %s\n%!" tenant
-   | Ok (Error msg) ->
-     eprintf "Registration failed: %s\n%!" msg;
-     Stdlib.exit 1
+   | Ok () -> printf "Registered as %s\n%!" tenant
    | Error msg ->
-     eprintf "Protocol error: %s\n%!" msg;
+     eprintf "Registration failed: %s\n%!" msg;
      Stdlib.exit 1);
   let rec read_loop () =
     match Eio.Buf_read.line reader with
@@ -220,10 +216,8 @@ let bridge_send_command :
     Eio.Flow.copy_string (line ^ "\n") flow;
     let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
     let response_line = Eio.Buf_read.line reader in
-    match Protocol.deserialize_response cmd response_line with
-    | Ok resp -> Protocol.serialize_response_json cmd resp
-    | Error msg ->
-      `Assoc [ ("status", `String "error"); ("message", `String msg) ]
+    Protocol.deserialize_response cmd response_line
+    |> Protocol.serialize_response_json cmd
   with
   | json -> json
   | exception exn ->
@@ -280,8 +274,7 @@ let bridge_push_fiber ~net ~tenant ~clock
        let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
        let first_line = Eio.Buf_read.line reader in
        (match Protocol.deserialize_response Register first_line with
-        | Ok (Ok ()) -> ()
-        | Ok (Error _msg) -> ()
+        | Ok () -> ()
         | Error _msg -> ());
        let rec read_loop () =
          let push_line = Eio.Buf_read.line reader in
