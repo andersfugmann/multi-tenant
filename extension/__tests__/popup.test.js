@@ -80,10 +80,10 @@ describe("context menus", () => {
     mock.listeners.onInstalled.forEach((cb) => cb({ reason: "install" }));
 
     expect(mock.chrome.contextMenus.create).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "open_in_tenant" })
+      expect.objectContaining({ id: "open_in" })
     );
     expect(mock.chrome.contextMenus.create).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "send_page_to_tenant" })
+      expect.objectContaining({ id: "send_to" })
     );
   });
 });

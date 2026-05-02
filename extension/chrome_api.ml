@@ -163,14 +163,14 @@ end
 (* ── Storage ─────────────────────────────────────────────────────── *)
 
 module Storage = struct
-  let local : _ Js.t = get (get chrome "storage") "local"
+  let local () : _ Js.t = get (get chrome "storage") "local"
 
   let get_local (keys : string list)
       ~(on_result : (string * string) list -> unit) : unit =
     let keys_arr =
       keys |> List.map ~f:Js.string |> Array.of_list |> Js.array
     in
-    call local "get"
+    call (local ()) "get"
       [| inject keys_arr;
          inject
            (Js.wrap_callback (fun items ->
@@ -189,7 +189,7 @@ module Storage = struct
       js_obj
         (List.map items ~f:(fun (k, v) -> (k, inject (Js.string v))))
     in
-    call local "set" [| inject obj; inject (Js.wrap_callback on_done) |]
+    call (local ()) "set" [| inject obj; inject (Js.wrap_callback on_done) |]
 end
 
 (* ── Context Menus ───────────────────────────────────────────────── *)

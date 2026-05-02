@@ -38,6 +38,12 @@ function createMock() {
     tabs: {
       create: jest.fn(),
     },
+    storage: {
+      local: {
+        get: jest.fn((_keys, cb) => cb({})),
+        set: jest.fn((_items, cb) => { if (cb) cb(); }),
+      },
+    },
     webNavigation: {
       onBeforeNavigate: {
         addListener: jest.fn((cb) => listeners.onBeforeNavigate.push(cb)),
@@ -45,6 +51,7 @@ function createMock() {
     },
     contextMenus: {
       create: jest.fn(),
+      removeAll: jest.fn((cb) => { if (cb) cb(); }),
       onClicked: {
         addListener: jest.fn((cb) => listeners.onContextMenuClicked.push(cb)),
       },

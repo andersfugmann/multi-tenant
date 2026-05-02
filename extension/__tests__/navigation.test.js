@@ -22,6 +22,8 @@ afterEach(() => {
 describe("navigation interception", () => {
   test("sends OPEN command for top-level navigation", () => {
     const port = mock.ports[0];
+    // Clear calls from initial Register + Get_config
+    port.postMessage.mockClear();
     triggerNavigation(mock.listeners, "https://example.com", 1, 0);
 
     expect(port.postMessage).toHaveBeenCalledTimes(1);
@@ -31,6 +33,7 @@ describe("navigation interception", () => {
 
   test("ignores sub-frame navigations", () => {
     const port = mock.ports[0];
+    port.postMessage.mockClear();
     triggerNavigation(mock.listeners, "https://example.com", 1, 1);
 
     expect(port.postMessage).not.toHaveBeenCalled();
@@ -38,6 +41,7 @@ describe("navigation interception", () => {
 
   test("ignores chrome:// URLs", () => {
     const port = mock.ports[0];
+    port.postMessage.mockClear();
     triggerNavigation(mock.listeners, "chrome://settings", 1, 0);
 
     expect(port.postMessage).not.toHaveBeenCalled();
@@ -45,6 +49,7 @@ describe("navigation interception", () => {
 
   test("ignores about: URLs", () => {
     const port = mock.ports[0];
+    port.postMessage.mockClear();
     triggerNavigation(mock.listeners, "about:blank", 1, 0);
 
     expect(port.postMessage).not.toHaveBeenCalled();
