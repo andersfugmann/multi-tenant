@@ -242,52 +242,44 @@ let bridge_command_fiber ~net ~tenant ~stdin_flow
   in
   loop ()
 
-(* -- Bridge: push fiber with reconnection *)
+(* -- Bridge: push fiber (connect once, no retry) *)
 
-let bridge_push_fiber ~net ~tenant ~clock
+let bridge_push_fiber ~net ~tenant
     ~(write_out : Yojson.Safe.t -> unit) : unit =
   let sock_path = socket_path () in
-  let max_backoff = 30.0 in
-  let rec connect_loop backoff =
-    (match
-       Eio.Switch.run @@ fun sw ->
-       let flow =
-         Eio.Net.connect ~sw net (`Unix sock_path)
-       in
-       let server_cmd : unit Protocol.server_command =
-         { tenant; command = Register }
-       in
-       let line = Protocol.serialize_server_command server_cmd in
-       Eio.Flow.copy_string (line ^ "\n") flow;
-       let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
-       let first_line = Eio.Buf_read.line reader in
-       (match Protocol.deserialize_response Register first_line with
-        | Ok () -> ()
-        | Error _msg -> ());
-       let rec read_loop () =
-         let push_line = Eio.Buf_read.line reader in
-         (match Protocol.deserialize_push push_line with
-          | Ok push ->
-            let msg = Protocol.bridge_push_to_yojson push in
-            write_out msg
-          | Error _msg -> ());
-         read_loop ()
-       in
-       read_loop ()
-     with
-     | () -> connect_loop 1.0
-     | exception _ ->
-       Eio.Time.sleep clock backoff;
-       let next_backoff = Float.min (backoff *. 2.0) max_backoff in
-       connect_loop next_backoff);
-  in
-  connect_loop 1.0
+  match
+    Eio.Switch.run @@ fun sw ->
+    let flow =
+      Eio.Net.connect ~sw net (`Unix sock_path)
+    in
+    let server_cmd : unit Protocol.server_command =
+      { tenant; command = Register }
+    in
+    let line = Protocol.serialize_server_command server_cmd in
+    Eio.Flow.copy_string (line ^ "\n") flow;
+    let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
+    let first_line = Eio.Buf_read.line reader in
+    (match Protocol.deserialize_response Register first_line with
+     | Ok () -> ()
+     | Error _msg -> ());
+    let rec read_loop () =
+      let push_line = Eio.Buf_read.line reader in
+      (match Protocol.deserialize_push push_line with
+       | Ok push ->
+         let msg = Protocol.bridge_push_to_yojson push in
+         write_out msg
+       | Error _msg -> ());
+      read_loop ()
+    in
+    read_loop ()
+  with
+  | () -> ()
+  | exception _exn -> ()
 
 (* -- Bridge mode entry point *)
 
 let run_bridge env =
   let net = Eio.Stdenv.net env in
-  let clock = Eio.Stdenv.clock env in
   let tenant = hostname () in
   let stdout_mutex = Eio.Mutex.create () in
   let stdout_flow = Eio.Stdenv.stdout env in
@@ -302,7 +294,7 @@ let run_bridge env =
         ~stdin_flow
         ~write_out)
     (fun () ->
-      bridge_push_fiber ~net ~tenant ~clock
+      bridge_push_fiber ~net ~tenant
         ~write_out)
 
 (* -- Detect if running as native messaging host *)
