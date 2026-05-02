@@ -4,6 +4,7 @@
   "version": "2.0.1",
   "description": "Route URLs between multi-tenant browser profiles",
   "permissions": [
+    "alarms",
     "webNavigation",
     "contextMenus",
     "nativeMessaging",

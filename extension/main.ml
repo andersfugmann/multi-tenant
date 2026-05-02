@@ -368,8 +368,9 @@ let handle_event (state : state) (event : event) : state =
   | Navigation { url } -> handle_navigation state url
   | Bridge_message { raw } -> handle_bridge_message state raw
   | Port_disconnected ->
-    log "Native port disconnected";
-    initial_state
+    log "Native port disconnected, reconnecting in 2s…";
+    Chrome_api.set_timeout (fun () -> push Connect_requested) 2000;
+    { initial_state with debug_logging = state.debug_logging }
   | Connect_requested -> connect state
   | Connect_with_settings { port; tenant_name; socket_path; debug_logging } ->
     connect_with_settings port tenant_name socket_path ~debug_logging
@@ -387,7 +388,10 @@ let handle_event (state : state) (event : event) : state =
 
 (* -- Coordinator loop *)
 
+let coordinator_state = ref initial_state
+
 let rec coordinator (state : state) : unit Lwt.t =
+  coordinator_state := state;
   let%lwt event = Lwt_stream.next event_stream in
   let state = handle_event state event in
   coordinator state
@@ -411,6 +415,12 @@ let register_chrome_listeners () : unit =
             { json;
               respond = (fun resp -> respond (json_to_string resp))
             }));
+  Chrome_api.Alarms.on_alarm (fun _name ->
+      match is_connected !coordinator_state with
+      | true -> ()
+      | false ->
+        log "Keepalive: not connected, reconnecting…";
+        push Connect_requested);
   on_installed (fun () ->
     log "Extension installed";
     push Setup_menus);
@@ -423,5 +433,6 @@ let register_chrome_listeners () : unit =
 let () =
   log "URL Router extension starting";
   register_chrome_listeners ();
+  Chrome_api.Alarms.create "keepalive" ~period_minutes:0.4;
   push Connect_requested;
   Lwt.async (fun () -> coordinator initial_state)

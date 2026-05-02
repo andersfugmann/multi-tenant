@@ -20,7 +20,7 @@ _build/node_modules/.stamp: extension/package.json
 deps: _build/node_modules/.stamp ## Install node dependencies
 
 test-extension: build _build/node_modules/.stamp ## Build and run extension tests
-	cd extension && NODE_PATH=../_build/node_modules ../_build/node_modules/.bin/jest
+	cd extension && NODE_PATH=../_build/node_modules ../_build/node_modules/.bin/jest --forceExit
 
 clean: ## Clean build artifacts
 	dune clean
