@@ -1,7 +1,7 @@
 open Base
 open Stdio
 
-(* ── State ─────────────────────────────────────────────────────────── *)
+(* -- State *)
 
 type state = {
   config : Protocol.config ref;
@@ -11,7 +11,7 @@ type state = {
   start_time : float;
 }
 
-(* ── Config loading / saving ───────────────────────────────────────── *)
+(* -- Config loading / saving *)
 
 let load_config (path : string) : (Protocol.config, string) Result.t =
   match Stdlib.Sys.file_exists path with
@@ -31,7 +31,7 @@ let config_mtime (path : string) : float option =
   | stat -> Some stat.Unix.st_mtime
   | exception Unix.Unix_error _ -> None
 
-(* ── Config file watcher (polling) ─────────────────────────────────── *)
+(* -- Config file watcher (polling) *)
 
 let config_watcher state clock =
   let last_mtime = ref (config_mtime state.config_path) in
@@ -52,7 +52,7 @@ let config_watcher state clock =
   in
   loop ()
 
-(* ── Rule evaluation ───────────────────────────────────────────────── *)
+(* -- Rule evaluation *)
 
 let compile_regex (pattern : string) : (Re.re, string) Result.t =
   match Re.compile (Re.Pcre.re pattern) with
@@ -80,7 +80,7 @@ let evaluate_rules (rules : Protocol.rule list) (url : string)
   | Some (target, idx) -> (target, idx)
   | None -> (default, None)
 
-(* ── Cooldown ──────────────────────────────────────────────────────── *)
+(* -- Cooldown *)
 
 let cooldown_key (tenant : string) (url : string) : string =
   tenant ^ "\x00" ^ url
@@ -103,7 +103,7 @@ let prune_cooldowns (state : state) : unit =
   state.cooldowns :=
     Map.filter !(state.cooldowns) ~f:(fun expiry -> Float.( > ) expiry now)
 
-(* ── Push to tenant ────────────────────────────────────────────────── *)
+(* -- Push to tenant *)
 
 let push_navigate (state : state) (target : string) (url : string) :
     (unit, string) Result.t =
@@ -114,7 +114,7 @@ let push_navigate (state : state) (target : string) (url : string) :
     Eio.Stream.add stream push_line;
     Ok ()
 
-(* ── Command handlers ──────────────────────────────────────────────── *)
+(* -- Command handlers *)
 
 let handle_open (state : state) (tenant : string) (url : string) :
     Protocol.route_result Protocol.response =
@@ -232,7 +232,7 @@ let handle_delete_rule (state : state) (idx : int) :
        Error
          (Printf.sprintf "failed to save config: %s" (Exn.to_string exn)))
 
-(* ── Command dispatch ──────────────────────────────────────────────── *)
+(* -- Command dispatch *)
 
 let dispatch_command :
     type a. state -> Protocol.tenant_id -> a Protocol.command -> string =
@@ -252,7 +252,7 @@ let dispatch_command :
   in
   Protocol.serialize_response cmd response
 
-(* ── Registration (long-lived connection) ──────────────────────────── *)
+(* -- Registration (long-lived connection) *)
 
 let handle_register state tenant flow reader =
   match Map.mem !(state.registry) tenant with
@@ -289,7 +289,7 @@ let handle_register state tenant flow reader =
     state.registry := Map.remove !(state.registry) tenant;
     eprintf "[url-router] tenant %s unregistered\n%!" tenant
 
-(* ── Connection handling ───────────────────────────────────────────── *)
+(* -- Connection handling *)
 
 let handle_connection state flow =
   let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
@@ -305,7 +305,7 @@ let handle_connection state flow =
        let response_line = dispatch_command state tenant command in
        Eio.Flow.copy_string (response_line ^ "\n") flow)
 
-(* ── Main ──────────────────────────────────────────────────────────── *)
+(* -- Main *)
 
 let () =
   Eio_main.run @@ fun env ->

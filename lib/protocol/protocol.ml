@@ -1,7 +1,7 @@
 open Base
 open Stdio
 
-(* ── Core data types ─────────────────────────────────────────────── *)
+(* -- Core data types *)
 
 type tenant_id = string [@@deriving yojson]
 type url = string [@@deriving yojson]
@@ -56,7 +56,7 @@ type status_info = {
 }
 [@@deriving yojson]
 
-(* ── Response payload types ──────────────────────────────────────── *)
+(* -- Response payload types *)
 
 type route_result =
   | Local
@@ -68,7 +68,7 @@ type test_result =
   | No_match of { default_tenant : tenant_id }
 [@@deriving yojson]
 
-(* ── GADT command type ───────────────────────────────────────────── *)
+(* -- GADT command type *)
 
 type _ command =
   | Register : unit command
@@ -82,17 +82,17 @@ type _ command =
   | Delete_rule : int -> unit command
   | Status : status_info command
 
-(* ── Type-safe response ──────────────────────────────────────────── *)
+(* -- Type-safe response *)
 
 type 'a response = ('a, string) Result.t
 
-(* ── Server push ─────────────────────────────────────────────────── *)
+(* -- Server push *)
 
 type _ server_push = Navigate : url -> url server_push
 
 type packed_server_push = Push : 'a server_push -> packed_server_push
 
-(* ── Existential wrappers ────────────────────────────────────────── *)
+(* -- Existential wrappers *)
 
 type packed_command = Command : 'a command -> packed_command
 
@@ -101,7 +101,7 @@ type 'a server_command = { tenant : tenant_id; command : 'a command }
 type packed_server_command =
   | Server_command : 'a server_command -> packed_server_command
 
-(* ── Helpers ─────────────────────────────────────────────────────── *)
+(* -- Helpers *)
 
 let words_n (s : string) (n : int) : (string list, string) Result.t =
   let parts = String.split s ~on:' ' in
@@ -120,7 +120,7 @@ let parse_json_string (s : string) : (Yojson.Safe.t, string) Result.t =
   | json -> Ok json
   | exception Yojson.Json_error msg -> Error (Printf.sprintf "invalid JSON: %s" msg)
 
-(* ── Line protocol: server commands ──────────────────────────────── *)
+(* -- Line protocol: server commands *)
 
 let serialize_server_command : type a. a server_command -> string =
  fun { tenant; command } ->
@@ -211,7 +211,7 @@ let deserialize_server_command (line : string) :
         | Ok _ -> Error "DELETE-RULE: parse error")
      | other -> Error (Printf.sprintf "unknown command: %s" other))
 
-(* ── Line protocol: responses ────────────────────────────────────── *)
+(* -- Line protocol: responses *)
 
 let serialize_response : type a. a command -> a response -> string =
  fun cmd resp ->
@@ -307,7 +307,7 @@ let deserialize_response :
        Error (Printf.sprintf "unrecognized response keyword: %s" other))
   | Ok _ -> Error "response parse error"
 
-(* ── Line protocol: server push ──────────────────────────────────── *)
+(* -- Line protocol: server push *)
 
 let serialize_push : type a. a server_push -> string =
  fun push ->
@@ -323,7 +323,7 @@ let deserialize_push (line : string) : (packed_server_push, string) Result.t =
      | other -> Error (Printf.sprintf "unknown push: %s" other))
   | Ok _ -> Error "push parse error"
 
-(* ── JSON serialization: commands ────────────────────────────────── *)
+(* -- JSON serialization: commands *)
 
 let serialize_command_json : type a. a command -> Yojson.Safe.t =
  fun cmd ->
@@ -423,7 +423,7 @@ let deserialize_command_json (json : Yojson.Safe.t) :
      | other ->
        Error (Printf.sprintf "unknown command: %s" other))
 
-(* ── JSON serialization: responses ───────────────────────────────── *)
+(* -- JSON serialization: responses *)
 
 let serialize_response_json :
     type a. a command -> a response -> Yojson.Safe.t =
@@ -528,7 +528,7 @@ let deserialize_response_json :
   | Ok other ->
     Error (Printf.sprintf "unknown status: %s" other)
 
-(* ── Bridge message envelope ─────────────────────────────────────── *)
+(* -- Bridge message envelope *)
 
 type bridge_message =
   | Response of Yojson.Safe.t
@@ -569,7 +569,7 @@ let bridge_message_of_yojson (json : Yojson.Safe.t) :
 (* Suppress unused open warnings — Stdio is used by convention *)
 let () = ignore (print_endline : string -> unit)
 
-(* ── Inline expect tests ─────────────────────────────────────────── *)
+(* -- Inline expect tests *)
 
 let%expect_test "sample data" =
   let _rule =
@@ -583,7 +583,7 @@ let%expect_test "sample data" =
   in
   [%expect {||}]
 
-(* ── Line protocol: server commands ─────────────────────────────── *)
+(* -- Line protocol: server commands *)
 
 let%expect_test "line: serialize register" =
   print_endline (serialize_server_command { tenant = "host"; command = Register });
@@ -711,7 +711,7 @@ let%expect_test "line: round-trip delete_rule" =
    | _ -> print_endline "FAIL");
   [%expect {| tenant=host idx=3 |}]
 
-(* ── Line protocol: responses ───────────────────────────────────── *)
+(* -- Line protocol: responses *)
 
 let%expect_test "line: response OK" =
   print_endline (serialize_response Register (Ok ()));
@@ -771,7 +771,7 @@ let%expect_test "line: round-trip response err with special chars" =
    | _ -> print_endline "FAIL");
   [%expect {| err=fail: "bad" & <oops> |}]
 
-(* ── Line protocol: server push ─────────────────────────────────── *)
+(* -- Line protocol: server push *)
 
 let%expect_test "line: push navigate" =
   print_endline (serialize_push (Navigate "https://example.com/path"));
@@ -784,7 +784,7 @@ let%expect_test "line: round-trip push navigate with spaces" =
    | _ -> print_endline "FAIL");
   [%expect {| url=https://example.com/q=hello world |}]
 
-(* ── JSON: commands ─────────────────────────────────────────────── *)
+(* -- JSON: commands *)
 
 let%expect_test "json: round-trip register" =
   let json = serialize_command_json Register in
@@ -851,7 +851,7 @@ let%expect_test "json: round-trip delete_rule" =
    | _ -> print_endline "FAIL");
   [%expect {| idx=7 |}]
 
-(* ── JSON: responses ────────────────────────────────────────────── *)
+(* -- JSON: responses *)
 
 let%expect_test "json: response ok" =
   let json = serialize_response_json Register (Ok ()) in
@@ -907,7 +907,7 @@ let%expect_test "json: round-trip response status" =
    | _ -> print_endline "FAIL");
   [%expect {| uptime=3600 |}]
 
-(* ── JSON: bridge messages ──────────────────────────────────────── *)
+(* -- JSON: bridge messages *)
 
 let%expect_test "json: bridge push round-trip" =
   let msg = Push (Push (Navigate "https://example.com")) in
@@ -929,7 +929,7 @@ let%expect_test "json: bridge response round-trip" =
    | _ -> print_endline "FAIL");
   [%expect {| {"status":"ok"} |}]
 
-(* ── Error handling ─────────────────────────────────────────────── *)
+(* -- Error handling *)
 
 let%expect_test "deserialize: invalid json string" =
   (match parse_json_string "not valid json{" with

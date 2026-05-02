@@ -1,18 +1,18 @@
 open Base
 open Stdio
 
-(* ── Socket path ─────────────────────────────────────────────────── *)
+(* -- Socket path *)
 
 let socket_path () =
   match Sys.getenv "URL_ROUTER_SOCKET" with
   | Some path -> path
   | None -> "/run/url-router.sock"
 
-(* ── Hostname detection ──────────────────────────────────────────── *)
+(* -- Hostname detection *)
 
 let hostname () = Unix.gethostname ()
 
-(* ── CLI argument parsing ────────────────────────────────────────── *)
+(* -- CLI argument parsing *)
 
 type cli_mode =
   | Cli_command of Protocol.packed_command
@@ -75,7 +75,7 @@ let parse_cli (argv : string array) : cli_mode =
       \  --bridge\n";
     Stdlib.exit 1
 
-(* ── Format a response for human-readable CLI output ─────────────── *)
+(* -- Format a response for human-readable CLI output *)
 
 let format_response : type a. a Protocol.command -> a Protocol.response -> string =
  fun cmd resp ->
@@ -110,7 +110,7 @@ let format_response : type a. a Protocol.command -> a Protocol.response -> strin
          (String.concat ~sep:", " info.registered_tenants)
          info.uptime_seconds)
 
-(* ── Send a command to the daemon and get a response (CLI) ───────── *)
+(* -- Send a command to the daemon and get a response (CLI) *)
 
 let send_command_cli :
     type a.
@@ -133,7 +133,7 @@ let send_command_cli :
   | Ok resp -> format_response cmd resp
   | Error msg -> Printf.sprintf "Protocol error: %s" msg
 
-(* ── CLI register: stay connected, print pushes ──────────────────── *)
+(* -- CLI register: stay connected, print pushes *)
 
 let run_register ~net =
   let sock_path = socket_path () in
@@ -173,7 +173,7 @@ let run_register ~net =
   in
   read_loop ()
 
-(* ── Native messaging framing ────────────────────────────────────── *)
+(* -- Native messaging framing *)
 
 let read_native_message source : Yojson.Safe.t option =
   let len_buf = Cstruct.create 4 in
@@ -200,7 +200,7 @@ let write_native_message sink (json : Yojson.Safe.t) : unit =
   Eio.Flow.copy_string (Cstruct.to_string len_buf) sink;
   Eio.Flow.copy_string data sink
 
-(* ── Bridge: send a command to daemon, return JSON response ──────── *)
+(* -- Bridge: send a command to daemon, return JSON response *)
 
 let bridge_send_command :
     type a.
@@ -233,7 +233,7 @@ let bridge_send_command :
         ("message", `String (Exn.to_string exn));
       ]
 
-(* ── Bridge: command fiber ───────────────────────────────────────── *)
+(* -- Bridge: command fiber *)
 
 let bridge_command_fiber ~net ~tenant ~stdin_flow
     ~(write_out : Yojson.Safe.t -> unit) : unit =
@@ -260,7 +260,7 @@ let bridge_command_fiber ~net ~tenant ~stdin_flow
   in
   loop ()
 
-(* ── Bridge: push fiber with reconnection ────────────────────────── *)
+(* -- Bridge: push fiber with reconnection *)
 
 let bridge_push_fiber ~net ~tenant ~clock
     ~(write_out : Yojson.Safe.t -> unit) : unit =
@@ -302,7 +302,7 @@ let bridge_push_fiber ~net ~tenant ~clock
   in
   connect_loop 1.0
 
-(* ── Bridge mode entry point ─────────────────────────────────────── *)
+(* -- Bridge mode entry point *)
 
 let run_bridge env =
   let net = Eio.Stdenv.net env in
@@ -324,11 +324,11 @@ let run_bridge env =
       bridge_push_fiber ~net ~tenant ~clock
         ~write_out)
 
-(* ── Detect if running as native messaging host ──────────────────── *)
+(* -- Detect if running as native messaging host *)
 
 let is_terminal () = Unix.isatty Unix.stdin
 
-(* ── Main ────────────────────────────────────────────────────────── *)
+(* -- Main *)
 
 let () =
   Eio_main.run @@ fun env ->

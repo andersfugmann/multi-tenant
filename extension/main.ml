@@ -6,7 +6,7 @@ open Js_of_ocaml
 let () = ignore (print_endline : string -> unit)
 let () = ignore (Lwt.return : 'a -> 'a Lwt.t)
 
-(* ── JS primitive externals (bound to chrome_api.js) ─────────────── *)
+(* -- JS primitive externals (bound to chrome_api.js) *)
 
 external connect_native_js : unit -> 'a = "url_router_connect_native"
 external create_tab_js : Js.js_string Js.t -> unit = "url_router_create_tab"
@@ -56,11 +56,11 @@ external log_js : Js.js_string Js.t -> unit = "url_router_log"
 external set_timeout_js : (unit -> unit) Js.callback -> int -> unit
   = "url_router_set_timeout"
 
-(* ── Logging ─────────────────────────────────────────────────────── *)
+(* -- Logging *)
 
 let log msg = log_js (Js.string msg)
 
-(* ── JSON conversion via strings (no Js.Unsafe) ─────────────────── *)
+(* -- JSON conversion via strings (no Js.Unsafe) *)
 
 let json_of_string (s : string) : (Yojson.Safe.t, string) Result.t =
   Protocol.parse_json_string s
@@ -68,7 +68,7 @@ let json_of_string (s : string) : (Yojson.Safe.t, string) Result.t =
 let json_to_string (json : Yojson.Safe.t) : string =
   Yojson.Safe.to_string json
 
-(* ── Typed wrappers around Chrome APIs ───────────────────────────── *)
+(* -- Typed wrappers around Chrome APIs *)
 
 let create_tab (url : string) : unit = create_tab_js (Js.string url)
 
@@ -103,7 +103,7 @@ let on_startup (f : unit -> unit) : unit =
 let set_timeout (f : unit -> unit) (ms : int) : unit =
   set_timeout_js (Js.wrap_callback f) ms
 
-(* ── State ───────────────────────────────────────────────────────── *)
+(* -- State *)
 
 type native_port
 
@@ -116,7 +116,7 @@ type connection_state = {
 let state =
   { native_port = None; connected = false; pending_callbacks = [] }
 
-(* ── JSON field accessor (protocol's string_field is internal) ──── *)
+(* -- JSON field accessor (protocol's string_field is internal) *)
 
 let string_field (json : Yojson.Safe.t) (key : string) :
     (string, string) Result.t =
@@ -128,7 +128,7 @@ let string_field (json : Yojson.Safe.t) (key : string) :
      | None -> Error (Printf.sprintf "missing field: %s" key))
   | _ -> Error "expected JSON object"
 
-(* ── Native messaging ───────────────────────────────────────────── *)
+(* -- Native messaging *)
 
 let send_to_bridge (json : Yojson.Safe.t)
     (on_response : Yojson.Safe.t -> unit) : unit =
@@ -163,7 +163,7 @@ let handle_bridge_message (msg_str : Js.js_string Js.t) : unit =
      | Error msg ->
        log (Printf.sprintf "Failed to parse bridge message: %s" msg))
 
-(* ── URL filtering ───────────────────────────────────────────────── *)
+(* -- URL filtering *)
 
 let is_internal_url (url : string) : bool =
   List.exists
@@ -178,7 +178,7 @@ let is_internal_url (url : string) : bool =
       "devtools://";
     ]
 
-(* ── Navigation interception ─────────────────────────────────────── *)
+(* -- Navigation interception *)
 
 let handle_navigation (url : string) (_tab_id : int) (frame_id : int)
     : unit =
@@ -207,7 +207,7 @@ let handle_navigation (url : string) (_tab_id : int) (frame_id : int)
               log (Printf.sprintf "Protocol error: %s" msg))))
   | _ -> ()
 
-(* ── Context menus ───────────────────────────────────────────────── *)
+(* -- Context menus *)
 
 let setup_context_menus () : unit =
   create_context_menu "open_in_tenant" "Open in tenant..." [ "link" ];
@@ -234,7 +234,7 @@ let handle_context_menu_click (menu_id : string) (link_url : string)
          (fun _resp -> ()))
   | _ -> ()
 
-(* ── Popup message handling ──────────────────────────────────────── *)
+(* -- Popup message handling *)
 
 let send_json_response (send_response : Js.js_string Js.t -> unit)
     (json : Yojson.Safe.t) : unit =
@@ -283,7 +283,7 @@ let rec handle_popup_message (msg_str : Js.js_string Js.t)
      | Error _ ->
        send (`Assoc [ ("error", `String "invalid message") ]))
 
-(* ── Connection management ───────────────────────────────────────── *)
+(* -- Connection management *)
 
 and connect_to_native () : unit =
   (match state.native_port with
@@ -317,7 +317,7 @@ and schedule_reconnect () : unit =
   log "Scheduling reconnection in 5 seconds...";
   set_timeout (fun () -> connect_to_native ()) 5000
 
-(* ── Initialization ──────────────────────────────────────────────── *)
+(* -- Initialization *)
 
 let init () : unit =
   log "URL Router extension starting";
