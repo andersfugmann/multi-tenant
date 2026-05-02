@@ -2,7 +2,6 @@ _build/
 *.install
 *.merlin
 .merlin
-extension/node_modules/
 debian/.debhelper/
 debian/debhelper-build-stamp
 debian/files
