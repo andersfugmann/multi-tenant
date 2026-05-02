@@ -342,7 +342,19 @@ let rec coordinator_loop (state : state) (inbox : coordinator_msg Eio.Stream.t) 
          let registry = Map.set state.registry ~key:tenant ~data:push_stream in
          Eio.Promise.resolve reply (Ok ());
          printf "[url-router] tenant %s registered\n%!" tenant;
-         { state with registry })
+         let state = { state with registry } in
+         (* Auto-add tenant to config if not already present *)
+         (match List.Assoc.find state.config.tenants ~equal:String.equal tenant with
+          | Some _ -> state
+          | None ->
+            let new_tenant : Protocol.tenant_config =
+              { browser_cmd = ""; label = tenant; color = "#808080" }
+            in
+            let tenants = state.config.tenants @ [ (tenant, new_tenant) ] in
+            let config = { state.config with tenants } in
+            printf "[url-router] auto-added tenant %s to config\n%!" tenant;
+            (try save_config_to_path state.config_path config with _ -> ());
+            { state with config }))
     | Unregister_tenant { tenant } ->
       let registry = Map.remove state.registry tenant in
       printf "[url-router] tenant %s unregistered\n%!" tenant;
