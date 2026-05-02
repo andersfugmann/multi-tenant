@@ -5,75 +5,7 @@ open Js_of_ocaml
 (* Suppress unused open *)
 let () = ignore (print_endline : string -> unit)
 
-(* -- JS primitive externals (bound to chrome_api.js) *)
-
-external connect_native_js : unit -> 'a = "url_router_connect_native"
-external create_tab_js : Js.js_string Js.t -> unit = "url_router_create_tab"
-
-external port_post_message_json_js :
-  'a -> Js.js_string Js.t -> unit
-  = "url_router_port_post_message_json"
-
-external port_on_message_json_js :
-  'a -> (Js.js_string Js.t -> unit) Js.callback -> unit
-  = "url_router_port_on_message_json"
-
-external port_on_disconnect_js : 'a -> (unit -> unit) Js.callback -> unit
-  = "url_router_port_on_disconnect"
-
-external on_before_navigate_js :
-  (Js.js_string Js.t -> int -> int -> unit) Js.callback -> unit
-  = "url_router_on_before_navigate"
-
-external create_context_menu_js :
-  Js.js_string Js.t ->
-  Js.js_string Js.t ->
-  Js.js_string Js.t Js.js_array Js.t ->
-  unit = "url_router_create_context_menu"
-
-external create_child_context_menu_js :
-  Js.js_string Js.t ->
-  Js.js_string Js.t ->
-  Js.js_string Js.t ->
-  Js.js_string Js.t Js.js_array Js.t ->
-  unit = "url_router_create_child_context_menu"
-
-external remove_all_context_menus_js :
-  (unit -> unit) Js.callback ->
-  unit = "url_router_remove_all_context_menus"
-
-external on_context_menu_clicked_js :
-  ( Js.js_string Js.t ->
-    Js.js_string Js.t ->
-    Js.js_string Js.t ->
-    unit)
-  Js.callback ->
-  unit = "url_router_on_context_menu_clicked"
-
-external on_installed_js : (unit -> unit) Js.callback -> unit
-  = "url_router_on_installed"
-
-external on_startup_js : (unit -> unit) Js.callback -> unit
-  = "url_router_on_startup"
-
-external on_message_json_js :
-  (Js.js_string Js.t -> (Js.js_string Js.t -> unit) -> unit)
-  Js.callback ->
-  unit = "url_router_on_message_json"
-
-external log_js : Js.js_string Js.t -> unit = "url_router_log"
-
-external get_browser_brand_js : unit -> Js.js_string Js.t = "url_router_get_browser_brand"
-
-external create_window_js : Js.js_string Js.t -> unit = "url_router_create_window"
-
-external storage_get_js :
-  (Js.js_string Js.t -> Js.js_string Js.t -> unit) Js.callback -> unit
-  = "url_router_storage_get"
-
-(* -- Logging *)
-
-let log msg = log_js (Js.string msg)
+let log = Chrome_api.log
 
 (* -- JSON conversion *)
 
@@ -95,49 +27,14 @@ let string_field (json : Yojson.Safe.t) (key : string) :
 
 (* -- Typed wrappers around Chrome APIs *)
 
-let create_tab (url : string) : unit = create_tab_js (Js.string url)
-
-let on_before_navigate (f : string -> int -> int -> unit) : unit =
-  on_before_navigate_js
-    (Js.wrap_callback (fun url tab_id frame_id ->
-       f (Js.to_string url) tab_id frame_id))
-
-let create_context_menu (id : string) (title : string)
-    (contexts : string list) : unit =
-  let contexts_arr =
-    contexts
-    |> List.map ~f:Js.string
-    |> Array.of_list
-    |> Js.array
-  in
-  create_context_menu_js (Js.string id) (Js.string title) contexts_arr
-
-let create_child_context_menu (id : string) (parent_id : string)
-    (title : string) (contexts : string list) : unit =
-  let contexts_arr =
-    contexts
-    |> List.map ~f:Js.string
-    |> Array.of_list
-    |> Js.array
-  in
-  create_child_context_menu_js (Js.string id) (Js.string parent_id)
-    (Js.string title) contexts_arr
-
-let remove_all_context_menus (callback : unit -> unit) : unit =
-  remove_all_context_menus_js (Js.wrap_callback callback)
-
-let on_context_menu_clicked
-    (f : string -> string -> string -> unit) : unit =
-  on_context_menu_clicked_js
-    (Js.wrap_callback (fun menu_id link_url page_url ->
-       f (Js.to_string menu_id) (Js.to_string link_url)
-         (Js.to_string page_url)))
-
-let on_installed (f : unit -> unit) : unit =
-  on_installed_js (Js.wrap_callback f)
-
-let on_startup (f : unit -> unit) : unit =
-  on_startup_js (Js.wrap_callback f)
+let create_tab = Chrome_api.Tabs.create_url
+let on_before_navigate = Chrome_api.Web_navigation.on_before_navigate
+let create_context_menu = Chrome_api.Context_menus.create
+let create_child_context_menu = Chrome_api.Context_menus.create_child
+let remove_all_context_menus = Chrome_api.Context_menus.remove_all
+let on_context_menu_clicked = Chrome_api.Context_menus.on_clicked
+let on_installed = Chrome_api.Runtime.on_installed
+let on_startup = Chrome_api.Runtime.on_startup
 
 (* -- URL filtering *)
 
@@ -156,7 +53,7 @@ let is_internal_url (url : string) : bool =
 
 (* -- Event types for the coordinator *)
 
-type native_port
+type native_port = Chrome_api.port
 
 type event =
   | Navigation of { url : string }
@@ -197,7 +94,7 @@ let send_to_bridge (state : state) (json : Yojson.Safe.t)
     log "No native port connected";
     state
   | Some p ->
-    port_post_message_json_js p (Js.string (json_to_string json));
+    Chrome_api.Port.post_message_json p (json_to_string json);
     { state with pending_callbacks = state.pending_callbacks @ [ on_response ] }
 
 let send_command (state : state) (cmd : Protocol.packed_command)
@@ -214,7 +111,7 @@ let non_empty (s : string) : string option =
   | false -> Some s
 
 let connect_with_settings (port : native_port) (tenant_name : string) (socket_path : string) : state =
-  let brand = non_empty (Js.to_string (get_browser_brand_js ())) in
+  let brand = non_empty (Chrome_api.Navigator.get_browser_brand ()) in
   let name = non_empty tenant_name in
   let socket = non_empty socket_path in
   log (Printf.sprintf "Browser brand: %s, tenant: %s, socket: %s"
@@ -237,22 +134,27 @@ let connect_with_settings (port : native_port) (tenant_name : string) (socket_pa
 
 let connect (_state : state) : state =
   match
-    let p = connect_native_js () in
+    let p = Chrome_api.Runtime.connect_native "url_router" in
     log "Connected to native messaging host";
-    port_on_message_json_js p
-      (Js.wrap_callback (fun msg ->
-         push (Bridge_message { raw = Js.to_string msg })));
-    port_on_disconnect_js p
-      (Js.wrap_callback (fun () -> push Port_disconnected));
+    Chrome_api.Port.on_message_json p (fun msg ->
+      push (Bridge_message { raw = msg }));
+    Chrome_api.Port.on_disconnect p (fun () -> push Port_disconnected);
     p
   with
   | p ->
-    (* Read extension settings, then finish connecting *)
-    storage_get_js (Js.wrap_callback (fun name socket ->
-        let tenant_name = Js.to_string name in
-        let socket_path = Js.to_string socket in
-        push (Connect_with_settings { port = p; tenant_name; socket_path })));
-    (* Return state with port connected but no Register sent yet *)
+    Chrome_api.Storage.get_local [ "tenant_name"; "socket_path" ]
+      ~on_result:(fun pairs ->
+        let find k =
+          List.Assoc.find pairs ~equal:String.equal k
+          |> Option.value ~default:""
+        in
+        push
+          (Connect_with_settings
+             {
+               port = p;
+               tenant_name = find "tenant_name";
+               socket_path = find "socket_path";
+             }));
     { native_port = Some p; pending_callbacks = []; tenant_names = [] }
   | exception exn ->
     log (Printf.sprintf "Failed to connect: %s" (Exn.to_string exn));
@@ -321,7 +223,7 @@ let handle_context_menu (state : state) (menu_id : string)
     let dialog_url =
       Printf.sprintf "add_rule.html?url=%s" encoded_url
     in
-    create_window_js (Js.string dialog_url);
+    Chrome_api.Windows.create_popup ~url:dialog_url ~width:420 ~height:300;
     state
   | "delete_rule" ->
     let url =
@@ -430,18 +332,17 @@ let handle_popup_query (state : state) (json : Yojson.Safe.t)
 
 let setup_context_menus (tenants : string list) : unit =
   remove_all_context_menus (fun () ->
-    (* Parent menus *)
-    create_context_menu "open_in" "Open link in…" [ "link" ];
-    create_context_menu "send_to" "Send page to…" [ "page" ];
-    (* Tenant submenus for both parents *)
+    create_context_menu ~id:"open_in" ~title:"Open link in…" ~contexts:[ "link" ];
+    create_context_menu ~id:"send_to" ~title:"Send page to…" ~contexts:[ "page" ];
     List.iter tenants ~f:(fun tid ->
       create_child_context_menu
-        (Printf.sprintf "open_in:%s" tid) "open_in" tid [ "link" ];
+        ~id:(Printf.sprintf "open_in:%s" tid) ~parent_id:"open_in"
+        ~title:tid ~contexts:[ "link" ];
       create_child_context_menu
-        (Printf.sprintf "send_to:%s" tid) "send_to" tid [ "page" ]);
-    (* Standalone items *)
-    create_context_menu "add_rule" "Add routing rule…" [ "page" ];
-    create_context_menu "delete_rule" "Delete matching rule" [ "page" ])
+        ~id:(Printf.sprintf "send_to:%s" tid) ~parent_id:"send_to"
+        ~title:tid ~contexts:[ "page" ]);
+    create_context_menu ~id:"add_rule" ~title:"Add routing rule…" ~contexts:[ "page" ];
+    create_context_menu ~id:"delete_rule" ~title:"Delete matching rule" ~contexts:[ "page" ])
 
 let handle_delete_rule_at (state : state) (index : int) : state =
   send_command state (Command (Delete_rule index)) (fun wire_resp ->
@@ -489,19 +390,16 @@ let register_chrome_listeners () : unit =
       | _ -> ());
   on_context_menu_clicked (fun menu_id link_url page_url ->
       push (Context_menu { menu_id; link_url; page_url }));
-  on_message_json_js
-    (Js.wrap_callback (fun msg_str send_response ->
-       match json_of_string (Js.to_string msg_str) with
-       | Error _ ->
-         send_response
-           (Js.string (json_to_string (`Assoc [ ("error", `String "invalid JSON") ])))
-       | Ok json ->
-         push
-           (Popup_query
-              { json;
-                respond = (fun resp ->
-                    send_response (Js.string (json_to_string resp)))
-              })));
+  Chrome_api.Runtime.on_message (fun msg_str respond ->
+     match json_of_string msg_str with
+     | Error _ ->
+       respond (json_to_string (`Assoc [ ("error", `String "invalid JSON") ]))
+     | Ok json ->
+       push
+         (Popup_query
+            { json;
+              respond = (fun resp -> respond (json_to_string resp))
+            }));
   on_installed (fun () ->
     log "Extension installed";
     push Setup_menus);

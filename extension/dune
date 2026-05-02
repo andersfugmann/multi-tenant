@@ -1,12 +1,18 @@
+(library
+ (name chrome_api)
+ (modules chrome_api)
+ (libraries js_of_ocaml base stdio)
+ (preprocess
+  (pps js_of_ocaml-ppx)))
+
 (executable
  (name main)
  (modules main)
  (modes js)
- (libraries protocol js_of_ocaml js_of_ocaml-lwt lwt base stdio yojson)
+ (libraries chrome_api protocol js_of_ocaml js_of_ocaml-lwt lwt base stdio yojson)
  (js_of_ocaml
-  (javascript_files chrome_api.js)
-  (build_runtime_flags (:standard -w no-free-variables))
-  (flags (:standard --Werror -w no-free-variables)))
+  (build_runtime_flags (:standard))
+  (flags (:standard --Werror)))
  (preprocess
   (pps js_of_ocaml-ppx lwt_ppx)))
 
@@ -14,11 +20,10 @@
  (names popup config_page options_page add_rule_page)
  (modules popup config_page options_page add_rule_page page_util)
  (modes js)
- (libraries protocol js_of_ocaml base stdio yojson)
+ (libraries chrome_api protocol js_of_ocaml base stdio yojson)
  (js_of_ocaml
-  (javascript_files page_api.js)
-  (build_runtime_flags (:standard -w no-free-variables))
-  (flags (:standard --Werror -w no-free-variables)))
+  (build_runtime_flags (:standard))
+  (flags (:standard --Werror)))
  (preprocess
   (pps js_of_ocaml-ppx)))
 

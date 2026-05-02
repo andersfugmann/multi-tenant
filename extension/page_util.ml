@@ -4,72 +4,33 @@ open Js_of_ocaml
 
 let () = ignore (print_endline : string -> unit)
 
-(* -- JS externals (bound to page_api.js) -- *)
-
-external send_message_raw :
-  Js.js_string Js.t ->
-  (Js.js_string Js.t -> Js.js_string Js.t -> unit) Js.callback ->
-  unit = "url_router_page_send_message"
-
-external storage_get_raw :
-  Js.js_string Js.t ->
-  (Js.js_string Js.t -> unit) Js.callback ->
-  unit = "url_router_page_storage_get"
-
-external storage_set_raw :
-  Js.js_string Js.t ->
-  (unit -> unit) Js.callback ->
-  unit = "url_router_page_storage_set"
-
-external create_tab_raw :
-  Js.js_string Js.t -> unit = "url_router_page_create_tab"
-
-external get_extension_url_raw :
-  Js.js_string Js.t -> Js.js_string Js.t = "url_router_page_get_extension_url"
-
 (* -- Chrome API wrappers -- *)
 
 let send_message (msg : Yojson.Safe.t)
     ~(on_response : (Yojson.Safe.t, string) Result.t -> unit) : unit =
-  send_message_raw
-    (Js.string (Yojson.Safe.to_string msg))
-    (Js.wrap_callback (fun err resp_str ->
-       let err_s = Js.to_string err in
-       match String.is_empty err_s with
-       | false -> on_response (Error err_s)
-       | true ->
-         (match Yojson.Safe.from_string (Js.to_string resp_str) with
-          | json -> on_response (Ok json)
-          | exception _ -> on_response (Error "invalid JSON response"))))
+  Chrome_api.Runtime.send_message
+    (Yojson.Safe.to_string msg)
+    ~on_response:(fun err resp_str ->
+      match String.is_empty err with
+      | false -> on_response (Error err)
+      | true ->
+        (match Yojson.Safe.from_string resp_str with
+         | json -> on_response (Ok json)
+         | exception _ -> on_response (Error "invalid JSON response")))
 
 let storage_get (keys : string list)
     ~(on_result : (string * string) list -> unit) : unit =
-  let keys_json = `List (List.map keys ~f:(fun k -> `String k)) in
-  storage_get_raw
-    (Js.string (Yojson.Safe.to_string keys_json))
-    (Js.wrap_callback (fun items_str ->
-       match Yojson.Safe.from_string (Js.to_string items_str) with
-       | `Assoc pairs ->
-         List.filter_map pairs ~f:(fun (k, v) ->
-           match v with
-           | `String s -> Some (k, s)
-           | _ -> None)
-         |> on_result
-       | _ -> on_result []
-       | exception _ -> on_result []))
+  Chrome_api.Storage.get_local keys ~on_result
 
 let storage_set (items : (string * string) list)
     ~(on_done : unit -> unit) : unit =
-  let json = `Assoc (List.map items ~f:(fun (k, v) -> (k, `String v))) in
-  storage_set_raw
-    (Js.string (Yojson.Safe.to_string json))
-    (Js.wrap_callback on_done)
+  Chrome_api.Storage.set_local items ~on_done
 
 let create_tab (url : string) : unit =
-  create_tab_raw (Js.string url)
+  Chrome_api.Tabs.create_url url
 
 let get_extension_url (path : string) : string =
-  Js.to_string (get_extension_url_raw (Js.string path))
+  Chrome_api.Runtime.get_url path
 
 let validate_regexp (pattern : string) : (unit, string) Result.t =
   match Regexp.regexp pattern with
@@ -101,11 +62,7 @@ let set_html (el : Dom_html.element Js.t) (html : string) : unit =
 let on_click (el : Dom_html.element Js.t) (f : unit -> unit) : unit =
   el##.onclick := Dom_html.handler (fun _ev -> f (); Js._true)
 
-let set_timeout (f : unit -> unit) (ms : int) : unit =
-  ignore
-    (Dom_html.window##setTimeout
-       (Js.wrap_callback f)
-       (Js.number_of_float (Float.of_int ms)))
+let set_timeout = Chrome_api.set_timeout
 
 let set_display (el : Dom_html.element Js.t) (value : string) : unit =
   el##.style##.display := Js.string value
