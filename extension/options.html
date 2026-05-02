@@ -60,7 +60,7 @@
       color: var(--muted);
       margin-top: 4px;
     }
-    .form-group input {
+    .form-group input[type="text"] {
       width: 100%;
       padding: 8px 10px;
       border: 1px solid var(--border);
@@ -69,10 +69,16 @@
       font-family: var(--font);
       background: var(--bg);
     }
-    .form-group input:focus {
+    .form-group input[type="text"]:focus {
       outline: none;
       border-color: var(--primary);
       box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.15);
+    }
+    .form-group label.checkbox {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
     }
     .actions {
       display: flex;
@@ -122,7 +128,7 @@
         <div class="hint">Override the Unix socket the bridge connects to. Leave blank for the default.</div>
       </div>
       <div class="form-group">
-        <label><input type="checkbox" id="debugLogging"> Enable debug logging</label>
+        <label class="checkbox"><input type="checkbox" id="debugLogging"> Enable debug logging</label>
         <div class="hint">Log request/response timing to the service worker console.</div>
       </div>
     </div>
