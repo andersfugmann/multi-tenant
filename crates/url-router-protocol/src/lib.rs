@@ -1,12 +1,8 @@
-//! Shared types for the url-router multi-tenant URL routing system.
+//! Shared types and protocol definitions for the url-router system.
 //!
-//! This crate provides:
-//! - Configuration types (tenants, rules, defaults) with serde derives
-//! - URL matching logic (regex-based, first match wins)
-//! - Protocol command and response types with FromStr/Display for line format
-//! - Shared newtypes (TenantId, RuleIndex)
-//!
-//! This crate contains no I/O — it is purely data types and pure functions.
+//! This crate is the single source of truth for configuration types,
+//! protocol message formats, routing logic, and domain newtypes.
+//! It performs no I/O and contains only pure functions and data types.
 
 pub mod config;
 pub mod matching;
