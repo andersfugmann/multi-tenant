@@ -11,13 +11,13 @@ let () = ignore (Lwt.return : 'a -> 'a Lwt.t)
 external connect_native_js : unit -> 'a = "url_router_connect_native"
 external create_tab_js : Js.js_string Js.t -> unit = "url_router_create_tab"
 
-external port_post_message_js : 'a -> 'b -> unit
-  = "url_router_port_post_message"
+external port_post_message_json_js :
+  'a -> Js.js_string Js.t -> unit
+  = "url_router_port_post_message_json"
 
-external port_on_message_js :
-  'a -> (Js.Unsafe.any -> unit) Js.callback -> unit
-  = "url_router_port_on_message"
-  [@@alert "-unsafe"]
+external port_on_message_json_js :
+  'a -> (Js.js_string Js.t -> unit) Js.callback -> unit
+  = "url_router_port_on_message_json"
 
 external port_on_disconnect_js : 'a -> (unit -> unit) Js.callback -> unit
   = "url_router_port_on_disconnect"
@@ -46,11 +46,10 @@ external on_installed_js : (unit -> unit) Js.callback -> unit
 external on_startup_js : (unit -> unit) Js.callback -> unit
   = "url_router_on_startup"
 
-external on_message_external_js :
-  (Js.Unsafe.any -> (Js.Unsafe.any -> unit) Js.callback -> unit)
+external on_message_json_js :
+  (Js.js_string Js.t -> (Js.js_string Js.t -> unit) -> unit)
   Js.callback ->
-  unit = "url_router_on_message_external"
-  [@@alert "-unsafe"]
+  unit = "url_router_on_message_json"
 
 external log_js : Js.js_string Js.t -> unit = "url_router_log"
 
@@ -61,24 +60,13 @@ external set_timeout_js : (unit -> unit) Js.callback -> int -> unit
 
 let log msg = log_js (Js.string msg)
 
-(* ── JSON conversion helpers ─────────────────────────────────────── *)
+(* ── JSON conversion via strings (no Js.Unsafe) ─────────────────── *)
 
-let js_to_json (js_val : Js.Unsafe.any) : Yojson.Safe.t
-    [@alert "-unsafe"] =
-  let json_str =
-    Js.to_string
-      (Js.Unsafe.fun_call
-         (Js.Unsafe.pure_js_expr "JSON.stringify")
-         [| js_val |])
-  in
-  Yojson.Safe.from_string json_str
+let json_of_string (s : string) : (Yojson.Safe.t, string) Result.t =
+  Protocol.parse_json_string s
 
-let json_to_js (json : Yojson.Safe.t) : Js.Unsafe.any
-    [@alert "-unsafe"] =
-  let s = Yojson.Safe.to_string json in
-  Js.Unsafe.fun_call
-    (Js.Unsafe.pure_js_expr "JSON.parse")
-    [| Js.Unsafe.inject (Js.string s) |]
+let json_to_string (json : Yojson.Safe.t) : string =
+  Yojson.Safe.to_string json
 
 (* ── Typed wrappers around Chrome APIs ───────────────────────────── *)
 
@@ -149,8 +137,7 @@ let send_to_bridge (json : Yojson.Safe.t)
   | Some p ->
     state.pending_callbacks <-
       state.pending_callbacks @ [ on_response ];
-    let js_msg = json_to_js json in
-    port_post_message_js p js_msg
+    port_post_message_json_js p (Js.string (json_to_string json))
 
 let send_command (cmd : Protocol.packed_command)
     (on_response : Yojson.Safe.t -> unit) : unit =
@@ -158,21 +145,23 @@ let send_command (cmd : Protocol.packed_command)
   let json = Protocol.serialize_command_json c in
   send_to_bridge json on_response
 
-let handle_bridge_message (js_msg : Js.Unsafe.any) : unit
-    [@alert "-unsafe"] =
-  let json = js_to_json js_msg in
-  match Protocol.bridge_message_of_yojson json with
-  | Ok (Protocol.Response data) ->
-    (match state.pending_callbacks with
-     | [] -> log "Received response with no pending callback"
-     | cb :: rest ->
-       state.pending_callbacks <- rest;
-       cb data)
-  | Ok (Protocol.Push (Protocol.Push (Protocol.Navigate url))) ->
-    log (Printf.sprintf "Received NAVIGATE push: %s" url);
-    create_tab url
-  | Error msg ->
-    log (Printf.sprintf "Failed to parse bridge message: %s" msg)
+let handle_bridge_message (msg_str : Js.js_string Js.t) : unit =
+  let s = Js.to_string msg_str in
+  match json_of_string s with
+  | Error msg -> log (Printf.sprintf "Failed to parse bridge JSON: %s" msg)
+  | Ok json ->
+    (match Protocol.bridge_message_of_yojson json with
+     | Ok (Protocol.Response data) ->
+       (match state.pending_callbacks with
+        | [] -> log "Received response with no pending callback"
+        | cb :: rest ->
+          state.pending_callbacks <- rest;
+          cb data)
+     | Ok (Protocol.Push (Protocol.Push (Protocol.Navigate url))) ->
+       log (Printf.sprintf "Received NAVIGATE push: %s" url);
+       create_tab url
+     | Error msg ->
+       log (Printf.sprintf "Failed to parse bridge message: %s" msg))
 
 (* ── URL filtering ───────────────────────────────────────────────── *)
 
@@ -247,55 +236,52 @@ let handle_context_menu_click (menu_id : string) (link_url : string)
 
 (* ── Popup message handling ──────────────────────────────────────── *)
 
-let rec handle_popup_message (msg : Js.Unsafe.any)
-    (send_response : Js.Unsafe.any -> unit) : unit
-    [@alert "-unsafe"] =
-  let json = js_to_json msg in
-  match string_field json "action" with
-  | Ok "get_status" ->
-    let resp =
-      `Assoc
-        [
-          ("connected", `Bool state.connected);
-          ( "info",
-            `String
-              (match state.connected with
-               | true -> "Native messaging host connected"
-               | false -> "Not connected to native host") );
-        ]
-    in
-    send_response (json_to_js resp)
-  | Ok "query_status" ->
-    send_command (Command Status) (fun data ->
-      send_response
-        (json_to_js
-           (`Assoc
-              [
-                ("connected", `Bool state.connected);
-                ("data", data);
-              ])))
-  | Ok "query_config" ->
-    send_command (Command Get_config) (fun data ->
-      send_response
-        (json_to_js
-           (`Assoc
-              [
-                ("connected", `Bool state.connected);
-                ("data", data);
-              ])))
-  | Ok "reconnect" ->
-    connect_to_native ();
-    let resp =
-      `Assoc [ ("connected", `Bool state.connected) ]
-    in
-    send_response (json_to_js resp)
-  | Ok other ->
-    log (Printf.sprintf "Unknown popup action: %s" other);
-    send_response
-      (json_to_js (`Assoc [ ("error", `String "unknown action") ]))
-  | Error _ ->
-    send_response
-      (json_to_js (`Assoc [ ("error", `String "invalid message") ]))
+let send_json_response (send_response : Js.js_string Js.t -> unit)
+    (json : Yojson.Safe.t) : unit =
+  send_response (Js.string (json_to_string json))
+
+let rec handle_popup_message (msg_str : Js.js_string Js.t)
+    (send_response : Js.js_string Js.t -> unit) : unit =
+  let send = send_json_response send_response in
+  match json_of_string (Js.to_string msg_str) with
+  | Error _ -> send (`Assoc [ ("error", `String "invalid JSON") ])
+  | Ok json ->
+    (match string_field json "action" with
+     | Ok "get_status" ->
+       send
+         (`Assoc
+            [
+              ("connected", `Bool state.connected);
+              ( "info",
+                `String
+                  (match state.connected with
+                   | true -> "Native messaging host connected"
+                   | false -> "Not connected to native host") );
+            ])
+     | Ok "query_status" ->
+       send_command (Command Status) (fun data ->
+           send
+             (`Assoc
+                [
+                  ("connected", `Bool state.connected);
+                  ("data", data);
+                ]))
+     | Ok "query_config" ->
+       send_command (Command Get_config) (fun data ->
+           send
+             (`Assoc
+                [
+                  ("connected", `Bool state.connected);
+                  ("data", data);
+                ]))
+     | Ok "reconnect" ->
+       connect_to_native ();
+       send (`Assoc [ ("connected", `Bool state.connected) ])
+     | Ok other ->
+       log (Printf.sprintf "Unknown popup action: %s" other);
+       send (`Assoc [ ("error", `String "unknown action") ])
+     | Error _ ->
+       send (`Assoc [ ("error", `String "invalid message") ]))
 
 (* ── Connection management ───────────────────────────────────────── *)
 
@@ -309,7 +295,7 @@ and connect_to_native () : unit =
     state.native_port <- Some p;
     state.connected <- true;
     log "Connected to native messaging host";
-    port_on_message_js p
+    port_on_message_json_js p
       (Js.wrap_callback (fun msg -> handle_bridge_message msg));
     port_on_disconnect_js p
       (Js.wrap_callback (fun () ->
@@ -338,10 +324,9 @@ let init () : unit =
   connect_to_native ();
   on_before_navigate handle_navigation;
   on_context_menu_clicked handle_context_menu_click;
-  on_message_external_js
-    (Js.wrap_callback (fun msg send_response ->
-       handle_popup_message msg (fun resp ->
-         Js.Unsafe.fun_call send_response [| resp |] |> ignore)));
+  on_message_json_js
+    (Js.wrap_callback (fun msg_str send_response ->
+       handle_popup_message msg_str send_response));
   on_installed (fun () ->
     log "Extension installed";
     setup_context_menus ());

@@ -1,5 +1,6 @@
 // chrome_api.js — thin JS helpers for Chrome extension APIs
 // Called from OCaml via typed js_of_ocaml bindings.
+// JSON marshaling happens here to avoid Js.Unsafe in OCaml.
 
 //Provides: url_router_connect_native
 function url_router_connect_native() {
@@ -11,15 +12,15 @@ function url_router_create_tab(url) {
   chrome.tabs.create({ url: url });
 }
 
-//Provides: url_router_port_post_message
-function url_router_port_post_message(port, msg) {
-  port.postMessage(msg);
+//Provides: url_router_port_post_message_json
+function url_router_port_post_message_json(port, json_str) {
+  port.postMessage(JSON.parse(json_str));
 }
 
-//Provides: url_router_port_on_message
-function url_router_port_on_message(port, callback) {
+//Provides: url_router_port_on_message_json
+function url_router_port_on_message_json(port, callback) {
   port.onMessage.addListener(function(msg) {
-    callback(msg);
+    callback(JSON.stringify(msg));
   });
 }
 
@@ -70,21 +71,14 @@ function url_router_on_startup(callback) {
   });
 }
 
-//Provides: url_router_on_message_external
-function url_router_on_message_external(callback) {
+//Provides: url_router_on_message_json
+function url_router_on_message_json(callback) {
   chrome.runtime.onMessage.addListener(function(message, _sender, sendResponse) {
-    callback(message, sendResponse);
+    callback(JSON.stringify(message), function(resp_json) {
+      sendResponse(JSON.parse(resp_json));
+    });
     return true;
   });
-}
-
-//Provides: url_router_get_last_error
-function url_router_get_last_error() {
-  var err = chrome.runtime.lastError;
-  if (err && err.message) {
-    return err.message;
-  }
-  return "";
 }
 
 //Provides: url_router_log
