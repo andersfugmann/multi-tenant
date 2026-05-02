@@ -122,8 +122,8 @@ Available CLI commands: `open <url>`, `open-on <tenant> <url>`, `test <url>`, `g
 The extension intercepts all HTTP/HTTPS navigations in the top frame via `webNavigation.onBeforeNavigate`. For each navigation, it sends an `open` command (without tenant ID — the native host adds it) to the daemon and waits for the response:
 
 - **LOCAL** — do nothing, let the navigation proceed
-- **REMOTE** — the URL has been pushed to another tenant's browser; close the tab (or go back if the tab had prior history)
-- **ERR** — log the error, keep the tab
+- **REMOTE** — the URL has been pushed to another tenant's browser; log the routing
+- **ERR** — log the error, let the navigation proceed
 
 ### Receiving URLs (NAVIGATE push)
 
@@ -133,49 +133,26 @@ When the daemon pushes a `NAVIGATE` message (via the registered connection), the
 
 The daemon tracks recently routed (tenant, URL) pairs. If the same URL is routed again within the cooldown window, the daemon responds LOCAL to prevent redirect loops. This handles the case where a NAVIGATE push triggers another `open` in the receiving tenant's extension.
 
-### Toolbar badge
-
-After each completed navigation, the extension sends a `test` command for the current URL. If the URL matches a rule, the toolbar badge shows the target tenant's configured label and color, giving a visual indicator of which tenant "owns" the page.
-
 ### Context menus
 
 Right-clicking on a page shows:
 
-- **Send to > \<tenant\>** — sends the current page's URL to the chosen tenant via `open-on` and closes the tab
-- **Assign tenant…** — opens a dialog to create a permanent routing rule
+- **Send page to tenant…** — routes the current page's URL through the daemon via `open-on`
+- **Add routing rule…** — opens a popup dialog with a regex pattern (pre-filled from the page origin) and a tenant dropdown populated from the configuration. Saving sends an `add-rule` command.
+- **Delete matching rule** — sends a `test` command for the current URL. If a rule matches, sends `delete-rule` with the returned rule index.
 
 Right-clicking on a link shows:
 
-- **Open link in > \<tenant\>** — sends the link's URL to the chosen tenant via `open-on`
-
-### Assign tenant dialog
-
-Opened from the context menu. Presents:
-
-- The current URL
-- A pre-filled regex pattern (defaults to the URL's origin)
-- A tenant dropdown populated from the configuration
-- A checkbox to also open the URL in the chosen tenant immediately
-
-Saving sends an `add-rule` command to the daemon, persisting the rule.
+- **Open in tenant…** — routes the link's URL through the daemon via `open-on`
 
 ### Popup
 
 Clicking the extension icon shows:
 
-- The current tab's URL
-- An "Open in \<tenant\>" button for each configured tenant (sends `open-on`)
-- A "Remember" button that lets the user pick a tenant and creates a routing rule for the current URL's origin
-
-### Settings page
-
-A full configuration editor accessible from the popup. Three tabs:
-
-- **Rules** — table of all routing rules with editable pattern, tenant dropdown, enabled checkbox. Rules can be added and deleted.
-- **Tenants** — cards for each tenant showing browser command, badge label, and badge color. Tenants can be added and deleted (deletion is blocked if rules reference the tenant).
-- **Defaults** — socket path, unmatched behavior, notification settings, cooldown duration, browser launch timeout.
-
-All changes are saved by sending a `set-config` command to the daemon with the full updated configuration.
+- A connection status indicator (green/red dot)
+- **View status** — queries daemon status (registered tenants, uptime)
+- **View config** — queries the current configuration
+- **Reconnect** — re-establishes the native messaging connection
 
 ## Configuration
 

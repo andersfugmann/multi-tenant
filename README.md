@@ -119,9 +119,10 @@ its first argument) and reloads on changes. See
 | `defaults.cooldown_seconds` | Suppress repeated (tenant, URL) routing within this window. |
 | `defaults.browser_launch_timeout` | Seconds to wait for browser registration after `browser_cmd`. |
 
-Configuration can also be modified via the CLI (`get-config`, `set-config`,
-`add-rule`, `update-rule`, `delete-rule`) or by editing the JSON file
-directly (the daemon picks up changes automatically).
+Configuration can also be modified via the extension context menu, the
+CLI (`get-config`, `set-config`, `add-rule`, `update-rule`,
+`delete-rule`), or by editing the JSON file directly (the daemon picks
+up changes automatically).
 
 ## Usage
 
