@@ -3,11 +3,13 @@ open Stdio
 
 (* -- State *)
 
+type cooldown_entry = { key : string; expires : float }
+
 type state = {
   config : Protocol.config ref;
   config_path : string;
   registry : string Eio.Stream.t Map.M(String).t ref;
-  cooldowns : float Map.M(String).t ref;
+  cooldowns : cooldown_entry list ref;
   start_time : float;
 }
 
@@ -85,23 +87,32 @@ let evaluate_rules (rules : Protocol.rule list) (url : string)
 let cooldown_key (tenant : string) (url : string) : string =
   tenant ^ "\x00" ^ url
 
+let check_and_prune_cooldowns (cooldowns : cooldown_entry list) ~now ~key :
+    bool * cooldown_entry list =
+  let rec go acc = function
+    | [] -> (false, List.rev acc)
+    | entry :: rest ->
+      (match Float.( > ) entry.expires now with
+       | false -> (false, List.rev acc)
+       | true ->
+         (match String.equal entry.key key with
+          | true -> (true, List.rev_append (entry :: acc) rest)
+          | false -> go (entry :: acc) rest))
+  in
+  go [] cooldowns
+
 let check_cooldown (state : state) (tenant : string) (url : string) : bool =
   let now = Unix.gettimeofday () in
   let key = cooldown_key tenant url in
-  match Map.find !(state.cooldowns) key with
-  | Some expiry -> Float.( > ) expiry now
-  | None -> false
+  let (found, pruned) = check_and_prune_cooldowns !(state.cooldowns) ~now ~key in
+  state.cooldowns := pruned;
+  found
 
 let record_cooldown (state : state) (tenant : string) (url : string) : unit =
   let now = Unix.gettimeofday () in
   let cooldown = Float.of_int !(state.config).defaults.cooldown_seconds in
   let key = cooldown_key tenant url in
-  state.cooldowns := Map.set !(state.cooldowns) ~key ~data:(now +. cooldown)
-
-let prune_cooldowns (state : state) : unit =
-  let now = Unix.gettimeofday () in
-  state.cooldowns :=
-    Map.filter !(state.cooldowns) ~f:(fun expiry -> Float.( > ) expiry now)
+  state.cooldowns := { key; expires = now +. cooldown } :: !(state.cooldowns)
 
 (* -- Push to tenant *)
 
@@ -331,7 +342,7 @@ let () =
       config = ref config;
       config_path;
       registry = ref (Map.empty (module String));
-      cooldowns = ref (Map.empty (module String));
+      cooldowns = ref [];
       start_time = Unix.gettimeofday ();
     }
   in
@@ -342,14 +353,6 @@ let () =
     Eio.Net.listen ~sw ~backlog:128 net (`Unix socket_path)
   in
   eprintf "[url-router] listening on %s\n%!" socket_path;
-  (* Periodically prune expired cooldowns *)
-  Eio.Fiber.fork_daemon ~sw (fun () ->
-      let rec loop () =
-        Eio.Time.sleep clock 30.0;
-        prune_cooldowns state;
-        loop ()
-      in
-      loop ());
   (* Run config watcher and accept loop concurrently *)
   Eio.Fiber.both
     (fun () -> config_watcher state clock)
