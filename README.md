@@ -193,6 +193,8 @@ Right-click context menus provide quick routing actions:
 |---------|-----------|--------|
 | **Link** | *Open in tenant…* | Routes the link URL through the daemon. |
 | **Page** | *Send page to tenant…* | Routes the current page URL through the daemon. |
+| **Page** | *Add routing rule…* | Opens a dialog to create a new rule (regex + tenant). The pattern is pre-filled from the current page's origin. |
+| **Page** | *Delete matching rule* | Tests the current URL against rules and deletes the matching rule. |
 
 ## Building from Source
 

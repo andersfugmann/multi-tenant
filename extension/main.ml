@@ -52,6 +52,8 @@ external on_message_json_js :
 
 external log_js : Js.js_string Js.t -> unit = "url_router_log"
 
+external create_window_js : Js.js_string Js.t -> unit = "url_router_create_window"
+
 (* -- Logging *)
 
 let log msg = log_js (Js.string msg)
@@ -133,6 +135,7 @@ type event =
   | Context_menu of { menu_id : string; link_url : string; page_url : string }
   | Popup_query of { json : Yojson.Safe.t; respond : Yojson.Safe.t -> unit }
   | Setup_menus
+  | Delete_rule_at of { index : int }
 
 type state = {
   native_port : native_port option;
@@ -242,6 +245,32 @@ let handle_context_menu (state : state) (menu_id : string)
      | false ->
        send_command state (Command (Open_on (target, page_url)))
          (fun _resp -> ()))
+  | "add_rule" ->
+    let encoded_url =
+      page_url |> Js.string |> Js.encodeURIComponent |> Js.to_string
+    in
+    let dialog_url =
+      Printf.sprintf "add_rule.html?url=%s" encoded_url
+    in
+    create_window_js (Js.string dialog_url);
+    state
+  | "delete_rule" ->
+    let url =
+      match String.is_empty page_url with
+      | true -> link_url
+      | false -> page_url
+    in
+    (match String.is_empty url with
+     | true -> state
+     | false ->
+       send_command state (Command (Test url)) (fun wire_resp ->
+           match Protocol.response_of_wire (Test url) wire_resp with
+           | Ok (Match { rule_index; _ }) ->
+             push (Delete_rule_at { index = rule_index })
+           | Ok (No_match _) ->
+             log (Printf.sprintf "No rule matches %s" url)
+           | Error msg ->
+             log (Printf.sprintf "Test error: %s" msg)))
   | _ -> state
 
 let handle_popup_query (state : state) (json : Yojson.Safe.t)
@@ -280,6 +309,30 @@ let handle_popup_query (state : state) (json : Yojson.Safe.t)
     let state = connect state in
     respond (`Assoc [ ("connected", `Bool (is_connected state)) ]);
     state
+  | Ok "add_rule" ->
+    let pattern =
+      match string_field json "pattern" with
+      | Ok s -> s
+      | Error _ -> ""
+    in
+    let target =
+      match string_field json "target" with
+      | Ok s -> s
+      | Error _ -> ""
+    in
+    (match String.is_empty pattern || String.is_empty target with
+     | true ->
+       respond (`Assoc [ ("error", `String "pattern and target required") ]);
+       state
+     | false ->
+       let rule : Protocol.rule =
+         { pattern; target; enabled = true }
+       in
+       send_command state (Command (Add_rule rule)) (fun wire_resp ->
+           match Protocol.response_of_wire (Add_rule rule) wire_resp with
+           | Ok () -> respond (`Assoc [ ("ok", `Bool true) ])
+           | Error msg ->
+             respond (`Assoc [ ("error", `String msg) ])))
   | Ok other ->
     log (Printf.sprintf "Unknown popup action: %s" other);
     respond (`Assoc [ ("error", `String "unknown action") ]);
@@ -291,7 +344,17 @@ let handle_popup_query (state : state) (json : Yojson.Safe.t)
 let setup_context_menus () : unit =
   create_context_menu "open_in_tenant" "Open in tenant..." [ "link" ];
   create_context_menu "send_page_to_tenant" "Send page to tenant..."
-    [ "page" ]
+    [ "page" ];
+  create_context_menu "add_rule" "Add routing rule..." [ "page" ];
+  create_context_menu "delete_rule" "Delete matching rule" [ "page" ]
+
+let handle_delete_rule_at (state : state) (index : int) : state =
+  send_command state (Command (Delete_rule index)) (fun wire_resp ->
+      match Protocol.response_of_wire (Delete_rule index) wire_resp with
+      | Ok () ->
+        log (Printf.sprintf "Deleted rule at index %d" index)
+      | Error msg ->
+        log (Printf.sprintf "Delete rule error: %s" msg))
 
 let handle_event (state : state) (event : event) : state =
   match event with
@@ -307,6 +370,8 @@ let handle_event (state : state) (event : event) : state =
   | Setup_menus ->
     setup_context_menus ();
     state
+  | Delete_rule_at { index } ->
+    handle_delete_rule_at state index
 
 (* -- Coordinator loop *)
 

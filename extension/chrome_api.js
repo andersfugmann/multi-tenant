@@ -86,6 +86,16 @@ function url_router_log(msg) {
   console.log("[url-router] " + msg);
 }
 
+//Provides: url_router_create_window
+function url_router_create_window(url) {
+  chrome.windows.create({
+    url: url,
+    type: "popup",
+    width: 420,
+    height: 300
+  });
+}
+
 //Provides: url_router_set_timeout
 function url_router_set_timeout(callback, ms) {
   setTimeout(callback, ms);
