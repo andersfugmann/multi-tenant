@@ -112,6 +112,10 @@ val serialize_response_json : 'a command -> 'a response -> Yojson.Safe.t
 val deserialize_response_json :
   'a command -> Yojson.Safe.t -> ('a response, string) Result.t
 
+(** {1 JSON helpers} *)
+
+val parse_json_string : string -> (Yojson.Safe.t, string) Result.t
+
 (** {1 Bridge message envelope} *)
 
 type bridge_message =

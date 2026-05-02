@@ -30,13 +30,15 @@ let parse_cli (argv : string array) : cli_mode =
   | [ "get-config" ] -> Cli_command (Command Get_config)
   | "set-config" :: [ json_file ] ->
     let content = In_channel.read_all json_file in
-    let json = Yojson.Safe.from_string content in
-    (match Protocol.config_of_yojson json with
+    (match
+       Result.bind (Protocol.parse_json_string content) ~f:Protocol.config_of_yojson
+     with
      | Ok cfg -> Cli_command (Command (Set_config cfg))
      | Error msg -> failwith (Printf.sprintf "invalid config JSON: %s" msg))
   | "add-rule" :: [ json_str ] ->
-    let json = Yojson.Safe.from_string json_str in
-    (match Protocol.rule_of_yojson json with
+    (match
+       Result.bind (Protocol.parse_json_string json_str) ~f:Protocol.rule_of_yojson
+     with
      | Ok rule -> Cli_command (Command (Add_rule rule))
      | Error msg -> failwith (Printf.sprintf "invalid rule JSON: %s" msg))
   | "update-rule" :: idx_str :: [ json_str ] ->
@@ -45,8 +47,9 @@ let parse_cli (argv : string array) : cli_mode =
       | Some i -> i
       | None -> failwith (Printf.sprintf "invalid index: %s" idx_str)
     in
-    let json = Yojson.Safe.from_string json_str in
-    (match Protocol.rule_of_yojson json with
+    (match
+       Result.bind (Protocol.parse_json_string json_str) ~f:Protocol.rule_of_yojson
+     with
      | Ok rule -> Cli_command (Command (Update_rule (idx, rule)))
      | Error msg -> failwith (Printf.sprintf "invalid rule JSON: %s" msg))
   | "delete-rule" :: [ idx_str ] ->

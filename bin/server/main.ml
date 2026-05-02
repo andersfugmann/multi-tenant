@@ -13,12 +13,13 @@ type state = {
 
 (* ── Config loading / saving ───────────────────────────────────────── *)
 
-let load_config (path : string) : Protocol.config =
-  let content = In_channel.read_all path in
-  let json = Yojson.Safe.from_string content in
-  match Protocol.config_of_yojson json with
-  | Ok config -> config
-  | Error msg -> failwith (Printf.sprintf "failed to parse config: %s" msg)
+let load_config (path : string) : (Protocol.config, string) Result.t =
+  match Stdlib.Sys.file_exists path with
+  | false -> Error (Printf.sprintf "config file not found: %s" path)
+  | true ->
+    let content = In_channel.read_all path in
+    Result.bind (Protocol.parse_json_string content) ~f:(fun json ->
+        Protocol.config_of_yojson json)
 
 let save_config (state : state) : unit =
   let json = Protocol.config_to_yojson !(state.config) in
@@ -41,20 +42,23 @@ let config_watcher state clock =
      | true -> ()
      | false ->
        last_mtime := current_mtime;
-       (match
-          (try Some (load_config state.config_path)
-           with _ -> None)
-        with
-        | Some new_config ->
+       (match load_config state.config_path with
+        | Ok new_config ->
           state.config := new_config;
           eprintf "[url-router] config reloaded\n%!"
-        | None ->
-          eprintf "[url-router] config reload failed, keeping current\n%!"));
+        | Error msg ->
+          eprintf "[url-router] config reload failed: %s\n%!" msg));
     loop ()
   in
   loop ()
 
 (* ── Rule evaluation ───────────────────────────────────────────────── *)
+
+let compile_regex (pattern : string) : (Re.re, string) Result.t =
+  match Re.compile (Re.Pcre.re pattern) with
+  | regex -> Ok regex
+  | exception exn ->
+    Error (Printf.sprintf "invalid regex '%s': %s" pattern (Exn.to_string exn))
 
 let evaluate_rules (rules : Protocol.rule list) (url : string)
     (default : string) : string * int option =
@@ -64,12 +68,11 @@ let evaluate_rules (rules : Protocol.rule list) (url : string)
          match rule.enabled with
          | false -> None
          | true ->
-           (match
-              try Some (Re.compile (Re.Pcre.re rule.pattern))
-              with _ -> None
-            with
-            | None -> None
-            | Some regex ->
+           (match compile_regex rule.pattern with
+            | Error msg ->
+              eprintf "[url-router] rule %d: %s\n%!" i msg;
+              None
+            | Ok regex ->
               (match Re.execp regex url with
                | true -> Some (rule.target, Some i)
                | false -> None)))
@@ -176,17 +179,23 @@ let handle_set_config (state : state) (cfg : Protocol.config) :
 
 let handle_add_rule (state : state) (rule : Protocol.rule) :
     unit Protocol.response =
-  let config = !(state.config) in
-  state.config := { config with rules = config.rules @ [ rule ] };
-  (try
-     save_config state;
-     Ok ()
-   with exn ->
-     Error (Printf.sprintf "failed to save config: %s" (Exn.to_string exn)))
+  match compile_regex rule.pattern with
+  | Error msg -> Error msg
+  | Ok _ ->
+    let config = !(state.config) in
+    state.config := { config with rules = config.rules @ [ rule ] };
+    (try
+       save_config state;
+       Ok ()
+     with exn ->
+       Error (Printf.sprintf "failed to save config: %s" (Exn.to_string exn)))
 
 let handle_update_rule (state : state) (idx : int) (rule : Protocol.rule) :
     unit Protocol.response =
-  let config = !(state.config) in
+  match compile_regex rule.pattern with
+  | Error msg -> Error msg
+  | Ok _ ->
+    let config = !(state.config) in
   let len = List.length config.rules in
   match idx >= 0 && idx < len with
   | false ->
@@ -310,7 +319,13 @@ let () =
       let home = Sys.getenv_exn "HOME" in
       home ^ "/.config/url-router/config.json"
   in
-  let config = load_config config_path in
+  let config =
+    match load_config config_path with
+    | Ok c -> c
+    | Error msg ->
+      eprintf "[url-router] fatal: %s\n%!" msg;
+      Stdlib.exit 1
+  in
   let state =
     {
       config = ref config;
