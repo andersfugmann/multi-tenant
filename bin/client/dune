@@ -1,0 +1,5 @@
+(executable
+ (name main)
+ (public_name url_router_client)
+ (package url-router)
+ (libraries protocol eio eio_main yojson base stdio unix))
