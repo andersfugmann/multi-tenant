@@ -292,17 +292,9 @@ end
 (* ── Navigator (browser brand detection) ─────────────────────────── *)
 
 module Navigator = struct
-  let dominated_brands : Set.M(String).t =
-    Set.of_list
-      (module String)
-      [
-        "Chromium";
-        "Not;A=Brand";
-        "Not A;Brand";
-        "Not_A Brand";
-        "Not/A)Brand";
-        "Not)A;Brand";
-      ]
+  let is_grease_brand (b : string) : bool =
+    String.is_prefix b ~prefix:"Not"
+    || String.equal b "Chromium"
 
   class type brand_entry = object
     method brand : Js.js_string Js.t Js.readonly_prop
@@ -346,7 +338,7 @@ module Navigator = struct
          in
          match
            List.find brands ~f:(fun b ->
-               not (Set.mem dominated_brands b))
+               not (is_grease_brand b))
          with
          | Some b -> b
          | None ->
