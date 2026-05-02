@@ -5,7 +5,7 @@
  (js_of_ocaml
   (javascript_files chrome_api.js))
  (preprocess
-  (pps js_of_ocaml-ppx)))
+  (pps js_of_ocaml-ppx lwt_ppx)))
 
 (rule
  (target main.js)
