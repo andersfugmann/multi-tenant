@@ -88,8 +88,11 @@ function renderTenants() {
       + (brandText ? ' <span class="tenant-brand">(' + escapeHtml(brandText) + ')</span>' : '')
       + '</div>'
       + '</div>'
-      + '<div class="tenant-cmd" title="' + escapeHtml(t.browser_cmd || "(not set)") + '">'
-      + escapeHtml(t.browser_cmd || "(not set)")
+      + '<div class="tenant-cmd" title="'
+      + escapeHtml(t.browser_cmd || "No launch command \u2014 browser will not be started automatically") + '">'
+      + (t.browser_cmd
+          ? escapeHtml(t.browser_cmd)
+          : '<span style="color:#5f6368;font-style:italic">no launch command</span>')
       + '</div>'
       + '<div class="row-actions">'
       + '  <button class="btn-icon" title="Edit" data-edit-tenant="' + escapeHtml(id) + '">✏️</button>'
