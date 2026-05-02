@@ -103,17 +103,11 @@ type packed_server_command =
 
 (* -- Helpers *)
 
-let words_n (s : string) (n : int) : (string list, string) Result.t =
-  let parts = String.split s ~on:' ' in
-  match Int.( >= ) (List.length parts) n with
-  | true ->
-    let front = List.take parts (n - 1) in
-    let rest =
-      List.drop parts (n - 1)
-      |> String.concat ~sep:" "
-    in
-    Ok (front @ [ rest ])
-  | false -> Error (Printf.sprintf "expected at least %d fields" n)
+let ( let* ) r f = Result.bind r ~f
+
+let split_first s =
+  String.lsplit2 s ~on:' '
+  |> Result.of_option ~error:"expected more fields"
 
 let parse_json_string (s : string) : (Yojson.Safe.t, string) Result.t =
   match Yojson.Safe.from_string s with
@@ -145,71 +139,52 @@ let serialize_server_command : type a. a server_command -> string =
 
 let deserialize_server_command (line : string) :
     (packed_server_command, string) Result.t =
-  match words_n line 2 with
-  | Error e -> Error e
-  | Ok parts ->
-    let keyword = List.hd_exn parts in
-    let rest = List.nth_exn parts 1 in
-    (match keyword with
-     | "REGISTER" ->
-       Ok (Server_command { tenant = rest; command = Register })
-     | "STATUS" ->
-       Ok (Server_command { tenant = rest; command = Status })
-     | "GET-CONFIG" ->
-       Ok (Server_command { tenant = rest; command = Get_config })
-     | "OPEN" ->
-       (match words_n rest 2 with
-        | Error e -> Error e
-        | Ok [ tenant; url ] ->
-          Ok (Server_command { tenant; command = Open url })
-        | Ok _ -> Error "OPEN: parse error")
-     | "TEST" ->
-       (match words_n rest 2 with
-        | Error e -> Error e
-        | Ok [ tenant; url ] ->
-          Ok (Server_command { tenant; command = Test url })
-        | Ok _ -> Error "TEST: parse error")
-     | "OPEN-ON" ->
-       (match words_n rest 3 with
-        | Error e -> Error e
-        | Ok [ tenant; target; url ] ->
-          Ok (Server_command { tenant; command = Open_on (target, url) })
-        | Ok _ -> Error "OPEN-ON: parse error")
-     | "SET-CONFIG" ->
-       Result.bind (words_n rest 2) ~f:(function
-         | [ tenant; json_str ] ->
-           Result.bind (parse_json_string json_str) ~f:(fun json ->
-               Result.bind (config_of_yojson json) ~f:(fun cfg ->
-                   Ok (Server_command { tenant; command = Set_config cfg })))
-         | _ -> Error "SET-CONFIG: parse error")
-     | "ADD-RULE" ->
-       Result.bind (words_n rest 2) ~f:(function
-         | [ tenant; json_str ] ->
-           Result.bind (parse_json_string json_str) ~f:(fun json ->
-               Result.bind (rule_of_yojson json) ~f:(fun r ->
-                   Ok (Server_command { tenant; command = Add_rule r })))
-         | _ -> Error "ADD-RULE: parse error")
-     | "UPDATE-RULE" ->
-       Result.bind (words_n rest 3) ~f:(function
-         | [ tenant; idx_str; json_str ] ->
-           Result.bind
-             (Int.of_string_opt idx_str
-              |> Result.of_option ~error:"UPDATE-RULE: invalid index")
-             ~f:(fun idx ->
-               Result.bind (parse_json_string json_str) ~f:(fun json ->
-                   Result.bind (rule_of_yojson json) ~f:(fun r ->
-                       Ok (Server_command { tenant; command = Update_rule (idx, r) }))))
-         | _ -> Error "UPDATE-RULE: parse error")
-     | "DELETE-RULE" ->
-       (match words_n rest 2 with
-        | Error e -> Error e
-        | Ok [ tenant; idx_str ] ->
-          (match Int.of_string_opt idx_str with
-           | None -> Error "DELETE-RULE: invalid index"
-           | Some idx ->
-             Ok (Server_command { tenant; command = Delete_rule idx }))
-        | Ok _ -> Error "DELETE-RULE: parse error")
-     | other -> Error (Printf.sprintf "unknown command: %s" other))
+  let* (keyword, rest) = split_first line in
+  match keyword with
+  | "REGISTER" ->
+    Ok (Server_command { tenant = rest; command = Register })
+  | "STATUS" ->
+    Ok (Server_command { tenant = rest; command = Status })
+  | "GET-CONFIG" ->
+    Ok (Server_command { tenant = rest; command = Get_config })
+  | "OPEN" ->
+    let* (tenant, url) = split_first rest in
+    Ok (Server_command { tenant; command = Open url })
+  | "TEST" ->
+    let* (tenant, url) = split_first rest in
+    Ok (Server_command { tenant; command = Test url })
+  | "OPEN-ON" ->
+    let* (tenant, rest') = split_first rest in
+    let* (target, url) = split_first rest' in
+    Ok (Server_command { tenant; command = Open_on (target, url) })
+  | "SET-CONFIG" ->
+    let* (tenant, json_str) = split_first rest in
+    let* json = parse_json_string json_str in
+    let* cfg = config_of_yojson json in
+    Ok (Server_command { tenant; command = Set_config cfg })
+  | "ADD-RULE" ->
+    let* (tenant, json_str) = split_first rest in
+    let* json = parse_json_string json_str in
+    let* r = rule_of_yojson json in
+    Ok (Server_command { tenant; command = Add_rule r })
+  | "UPDATE-RULE" ->
+    let* (tenant, rest') = split_first rest in
+    let* (idx_str, json_str) = split_first rest' in
+    let* idx =
+      Int.of_string_opt idx_str
+      |> Result.of_option ~error:"UPDATE-RULE: invalid index"
+    in
+    let* json = parse_json_string json_str in
+    let* r = rule_of_yojson json in
+    Ok (Server_command { tenant; command = Update_rule (idx, r) })
+  | "DELETE-RULE" ->
+    let* (tenant, idx_str) = split_first rest in
+    let* idx =
+      Int.of_string_opt idx_str
+      |> Result.of_option ~error:"DELETE-RULE: invalid index"
+    in
+    Ok (Server_command { tenant; command = Delete_rule idx })
+  | other -> Error (Printf.sprintf "unknown command: %s" other)
 
 (* -- Line protocol: responses *)
 
@@ -248,8 +223,8 @@ let serialize_response : type a. a command -> a response -> string =
 let deserialize_response :
     type a. a command -> string -> (a response, string) Result.t =
  fun cmd line ->
-  match words_n line 2 with
-  | Error _ ->
+  match String.lsplit2 line ~on:' ' with
+  | None ->
     (* single-word responses *)
     (match line with
      | "OK" ->
@@ -266,7 +241,7 @@ let deserialize_response :
         | Open_on _ -> Ok (Ok Local)
         | _ -> Error "unexpected LOCAL for this command")
      | other -> Error (Printf.sprintf "unrecognized response: %s" other))
-  | Ok [ keyword; rest ] ->
+  | Some (keyword, rest) ->
     (match keyword with
      | "ERR" -> Ok (Error rest)
      | "REMOTE" ->
@@ -277,13 +252,12 @@ let deserialize_response :
      | "MATCH" ->
        (match cmd with
         | Test _ ->
-          (match words_n rest 2 with
-           | Ok [ tid; idx_str ] ->
-             (match Int.of_string_opt idx_str with
-              | Some idx ->
-                Ok (Ok (Match { tenant = tid; rule_index = idx }))
-              | None -> Error "MATCH: invalid index")
-           | _ -> Error "MATCH: parse error")
+          let* (tid, idx_str) = split_first rest in
+          let* idx =
+            Int.of_string_opt idx_str
+            |> Result.of_option ~error:"MATCH: invalid index"
+          in
+          Ok (Ok (Match { tenant = tid; rule_index = idx }))
         | _ -> Error "unexpected MATCH for this command")
      | "NOMATCH" ->
        (match cmd with
@@ -292,20 +266,19 @@ let deserialize_response :
      | "CONFIG" ->
        (match cmd with
         | Get_config ->
-          Result.bind (parse_json_string rest) ~f:(fun json ->
-              Result.bind (config_of_yojson json) ~f:(fun cfg ->
-                  Ok (Ok cfg)))
+          let* json = parse_json_string rest in
+          let* cfg = config_of_yojson json in
+          Ok (Ok cfg)
         | _ -> Error "unexpected CONFIG for this command")
      | "STATUS" ->
        (match cmd with
         | Status ->
-          Result.bind (parse_json_string rest) ~f:(fun json ->
-              Result.bind (status_info_of_yojson json) ~f:(fun si ->
-                  Ok (Ok si)))
+          let* json = parse_json_string rest in
+          let* si = status_info_of_yojson json in
+          Ok (Ok si)
         | _ -> Error "unexpected STATUS for this command")
      | other ->
        Error (Printf.sprintf "unrecognized response keyword: %s" other))
-  | Ok _ -> Error "response parse error"
 
 (* -- Line protocol: server push *)
 
@@ -315,13 +288,10 @@ let serialize_push : type a. a server_push -> string =
   | Navigate url -> Printf.sprintf "NAVIGATE %s" url
 
 let deserialize_push (line : string) : (packed_server_push, string) Result.t =
-  match words_n line 2 with
-  | Error e -> Error e
-  | Ok [ keyword; rest ] ->
-    (match keyword with
-     | "NAVIGATE" -> Ok (Push (Navigate rest))
-     | other -> Error (Printf.sprintf "unknown push: %s" other))
-  | Ok _ -> Error "push parse error"
+  let* (keyword, rest) = split_first line in
+  match keyword with
+  | "NAVIGATE" -> Ok (Push (Navigate rest))
+  | other -> Error (Printf.sprintf "unknown push: %s" other)
 
 (* -- JSON serialization: commands *)
 
@@ -950,4 +920,4 @@ let%expect_test "deserialize: empty line" =
   (match deserialize_server_command "" with
    | Error msg -> printf "error=%s\n" msg
    | Ok _ -> print_endline "UNEXPECTED OK");
-  [%expect {| error=expected at least 2 fields |}]
+  [%expect {| error=expected more fields |}]
