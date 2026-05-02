@@ -306,33 +306,57 @@ module Navigator = struct
 
   class type navigator = object
     method userAgentData : user_agent_data Js.t Js.Optdef.t Js.readonly_prop
+    method userAgent : Js.js_string Js.t Js.readonly_prop
   end
+
+  let brand_from_user_agent (ua : string) : string =
+    let ua_lower = String.lowercase ua in
+    let candidates =
+      [ ("edg/", "Microsoft Edge");
+        ("opr/", "Opera");
+        ("brave/", "Brave");
+        ("vivaldi/", "Vivaldi");
+        ("chrome/", "Google Chrome");
+        ("chromium/", "Chromium") ]
+    in
+    List.find_map candidates ~f:(fun (token, name) ->
+        match String.is_substring ua_lower ~substring:token with
+        | true -> Some name
+        | false -> None)
+    |> Option.value ~default:""
+
+  let brand_from_ua_data (uad : user_agent_data Js.t) : string =
+    Js.Optdef.case uad##.brands
+      (fun () -> "")
+      (fun arr ->
+         let len = arr##.length in
+         let brands =
+           List.init len ~f:(fun i ->
+               Js.Optdef.case (Js.array_get arr i)
+                 (fun () -> "")
+                 (fun entry -> Js.to_string entry##.brand))
+         in
+         match
+           List.find brands ~f:(fun b ->
+               not (Set.mem dominated_brands b))
+         with
+         | Some b -> b
+         | None ->
+           (match brands with
+            | b :: _ -> b
+            | [] -> ""))
 
   let get_browser_brand () : string =
     match get_opt global "navigator" with
     | None -> ""
     | Some nav_js ->
       let nav : navigator Js.t = Js.Unsafe.coerce nav_js in
-      Js.Optdef.case nav##.userAgentData
-        (fun () -> "")
-        (fun uad ->
-           Js.Optdef.case uad##.brands
-             (fun () -> "")
-             (fun arr ->
-                let len = arr##.length in
-                let brands =
-                  List.init len ~f:(fun i ->
-                      Js.Optdef.case (Js.array_get arr i)
-                        (fun () -> "")
-                        (fun entry -> Js.to_string entry##.brand))
-                in
-                (match
-                   List.find brands ~f:(fun b ->
-                       not (Set.mem dominated_brands b))
-                 with
-                 | Some b -> b
-                 | None ->
-                   (match brands with
-                    | b :: _ -> b
-                    | [] -> ""))))
+      let from_ua_data =
+        Js.Optdef.case nav##.userAgentData
+          (fun () -> "")
+          brand_from_ua_data
+      in
+      match String.is_empty from_ua_data with
+      | false -> from_ua_data
+      | true -> brand_from_user_agent (Js.to_string nav##.userAgent)
 end
