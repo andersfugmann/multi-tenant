@@ -401,9 +401,9 @@ let handle_register (inbox : coordinator_msg Eio.Stream.t) ~tenant ~brand flow r
     let err = Protocol.serialize_response (Register brand) (Error msg) in
     Eio.Flow.copy_string (err ^ "\n") flow
   | Ok () ->
-    let ok = Protocol.serialize_response (Register brand) (Ok ()) in
-    Eio.Flow.copy_string (ok ^ "\n") flow;
     (match
+       let ok = Protocol.serialize_response (Register brand) (Ok ()) in
+       Eio.Flow.copy_string (ok ^ "\n") flow;
        Eio.Fiber.both
          (fun () ->
            let rec write_loop () =
