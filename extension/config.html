@@ -311,7 +311,7 @@
           <span class="dot" id="statusDot"></span>
           <span id="statusText">Connecting…</span>
         </div>
-        <button class="btn btn-sm" onclick="window.close()">✕ Close</button>
+        <button class="btn btn-sm" onclick="chrome.tabs.getCurrent(function(t){chrome.tabs.remove(t.id)})">✕ Close</button>
       </div>
     </header>
 
