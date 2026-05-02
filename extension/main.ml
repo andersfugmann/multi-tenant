@@ -31,6 +31,17 @@ external create_context_menu_js :
   Js.js_string Js.t Js.js_array Js.t ->
   unit = "url_router_create_context_menu"
 
+external create_child_context_menu_js :
+  Js.js_string Js.t ->
+  Js.js_string Js.t ->
+  Js.js_string Js.t ->
+  Js.js_string Js.t Js.js_array Js.t ->
+  unit = "url_router_create_child_context_menu"
+
+external remove_all_context_menus_js :
+  (unit -> unit) Js.callback ->
+  unit = "url_router_remove_all_context_menus"
+
 external on_context_menu_clicked_js :
   ( Js.js_string Js.t ->
     Js.js_string Js.t ->
@@ -95,6 +106,20 @@ let create_context_menu (id : string) (title : string)
   in
   create_context_menu_js (Js.string id) (Js.string title) contexts_arr
 
+let create_child_context_menu (id : string) (parent_id : string)
+    (title : string) (contexts : string list) : unit =
+  let contexts_arr =
+    contexts
+    |> List.map ~f:Js.string
+    |> Array.of_list
+    |> Js.array
+  in
+  create_child_context_menu_js (Js.string id) (Js.string parent_id)
+    (Js.string title) contexts_arr
+
+let remove_all_context_menus (callback : unit -> unit) : unit =
+  remove_all_context_menus_js (Js.wrap_callback callback)
+
 let on_context_menu_clicked
     (f : string -> string -> string -> unit) : unit =
   on_context_menu_clicked_js
@@ -135,11 +160,13 @@ type event =
   | Context_menu of { menu_id : string; link_url : string; page_url : string }
   | Popup_query of { json : Yojson.Safe.t; respond : Yojson.Safe.t -> unit }
   | Setup_menus
+  | Refresh_menus of { tenants : string list }
   | Delete_rule_at of { index : int }
 
 type state = {
   native_port : native_port option;
   pending_callbacks : (Protocol.Wire.response -> unit) list;
+  tenant_names : string list;
 }
 
 (* -- Event stream *)
@@ -151,7 +178,7 @@ let push ev = push_event (Some ev)
 
 (* -- State operations (pure) *)
 
-let initial_state = { native_port = None; pending_callbacks = [] }
+let initial_state = { native_port = None; pending_callbacks = []; tenant_names = [] }
 
 let is_connected (state : state) : bool =
   Option.is_some state.native_port
@@ -185,7 +212,14 @@ let connect (_state : state) : state =
       (Js.wrap_callback (fun () -> push Port_disconnected));
     p
   with
-  | p -> { native_port = Some p; pending_callbacks = [] }
+  | p ->
+    let state = { native_port = Some p; pending_callbacks = []; tenant_names = [] } in
+    send_command state (Command Get_config) (fun wire_resp ->
+        match Protocol.response_of_wire Get_config wire_resp with
+        | Ok cfg ->
+          push (Refresh_menus { tenants = List.map cfg.tenants ~f:fst })
+        | Error msg ->
+          log (Printf.sprintf "Config fetch for menus failed: %s" msg))
   | exception exn ->
     log (Printf.sprintf "Failed to connect: %s" (Exn.to_string exn));
     initial_state
@@ -231,20 +265,21 @@ let handle_navigation (state : state) (url : string) : state =
 
 let handle_context_menu (state : state) (menu_id : string)
     (link_url : string) (page_url : string) : state =
-  let target = "default" in
-  match menu_id with
-  | "open_in_tenant" ->
+  match String.lsplit2 menu_id ~on:':' with
+  | Some ("open_in", target) ->
     (match String.is_empty link_url with
      | true -> state
      | false ->
        send_command state (Command (Open_on (target, link_url)))
          (fun _resp -> ()))
-  | "send_page_to_tenant" ->
+  | Some ("send_to", target) ->
     (match String.is_empty page_url with
      | true -> state
      | false ->
        send_command state (Command (Open_on (target, page_url)))
          (fun _resp -> ()))
+  | _ ->
+  match menu_id with
   | "add_rule" ->
     let encoded_url =
       page_url |> Js.string |> Js.encodeURIComponent |> Js.to_string
@@ -333,6 +368,24 @@ let handle_popup_query (state : state) (json : Yojson.Safe.t)
            | Ok () -> respond (`Assoc [ ("ok", `Bool true) ])
            | Error msg ->
              respond (`Assoc [ ("error", `String msg) ])))
+  | Ok "set_config" ->
+    (match Yojson.Safe.Util.member "config" json with
+     | `Null ->
+       respond (`Assoc [ ("error", `String "config field required") ]);
+       state
+     | config_json ->
+       (match Protocol.config_of_yojson config_json with
+        | Error msg ->
+          respond (`Assoc [ ("error", `String msg) ]);
+          state
+        | Ok cfg ->
+          send_command state (Command (Set_config cfg)) (fun wire_resp ->
+              match Protocol.response_of_wire (Set_config cfg) wire_resp with
+              | Ok () ->
+                push (Refresh_menus { tenants = List.map cfg.tenants ~f:fst });
+                respond (`Assoc [ ("ok", `Bool true) ])
+              | Error msg ->
+                respond (`Assoc [ ("error", `String msg) ]))))
   | Ok other ->
     log (Printf.sprintf "Unknown popup action: %s" other);
     respond (`Assoc [ ("error", `String "unknown action") ]);
@@ -341,12 +394,20 @@ let handle_popup_query (state : state) (json : Yojson.Safe.t)
     respond (`Assoc [ ("error", `String "invalid message") ]);
     state
 
-let setup_context_menus () : unit =
-  create_context_menu "open_in_tenant" "Open in tenant..." [ "link" ];
-  create_context_menu "send_page_to_tenant" "Send page to tenant..."
-    [ "page" ];
-  create_context_menu "add_rule" "Add routing rule..." [ "page" ];
-  create_context_menu "delete_rule" "Delete matching rule" [ "page" ]
+let setup_context_menus (tenants : string list) : unit =
+  remove_all_context_menus (fun () ->
+    (* Parent menus *)
+    create_context_menu "open_in" "Open link in…" [ "link" ];
+    create_context_menu "send_to" "Send page to…" [ "page" ];
+    (* Tenant submenus for both parents *)
+    List.iter tenants ~f:(fun tid ->
+      create_child_context_menu
+        (Printf.sprintf "open_in:%s" tid) "open_in" tid [ "link" ];
+      create_child_context_menu
+        (Printf.sprintf "send_to:%s" tid) "send_to" tid [ "page" ]);
+    (* Standalone items *)
+    create_context_menu "add_rule" "Add routing rule…" [ "page" ];
+    create_context_menu "delete_rule" "Delete matching rule" [ "page" ])
 
 let handle_delete_rule_at (state : state) (index : int) : state =
   send_command state (Command (Delete_rule index)) (fun wire_resp ->
@@ -368,8 +429,11 @@ let handle_event (state : state) (event : event) : state =
     handle_context_menu state menu_id link_url page_url
   | Popup_query { json; respond } -> handle_popup_query state json respond
   | Setup_menus ->
-    setup_context_menus ();
+    setup_context_menus state.tenant_names;
     state
+  | Refresh_menus { tenants } ->
+    setup_context_menus tenants;
+    { state with tenant_names = tenants }
   | Delete_rule_at { index } ->
     handle_delete_rule_at state index
 

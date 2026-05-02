@@ -36,13 +36,8 @@ document.getElementById("btnStatus").addEventListener("click", function() {
 });
 
 document.getElementById("btnConfig").addEventListener("click", function() {
-  chrome.runtime.sendMessage({ action: "query_config" }, function(response) {
-    if (chrome.runtime.lastError || !response) {
-      showInfo("Error fetching config");
-      return;
-    }
-    showInfo(JSON.stringify(response.data, null, 2));
-  });
+  chrome.tabs.create({ url: chrome.runtime.getURL("config.html") });
+  window.close();
 });
 
 document.getElementById("btnReconnect").addEventListener("click", function() {

@@ -34,14 +34,13 @@ chrome.runtime.sendMessage({ action: "query_config" }, function(response) {
     return;
   }
   tenantSelect.innerHTML = "";
-  // tenants is an array of [name, {label, ...}] pairs (yojson encoding)
+  // tenants is a JSON object keyed by tenant ID
   var tenants = config.tenants;
-  if (Array.isArray(tenants)) {
-    tenants.forEach(function(entry) {
-      var name = Array.isArray(entry) ? entry[0] : entry;
+  if (tenants && typeof tenants === "object") {
+    Object.keys(tenants).forEach(function(name) {
       var opt = document.createElement("option");
       opt.value = name;
-      opt.textContent = name;
+      opt.textContent = tenants[name].label || name;
       tenantSelect.appendChild(opt);
     });
   }

@@ -47,6 +47,23 @@ function url_router_create_context_menu(id, title, contexts) {
   });
 }
 
+//Provides: url_router_create_child_context_menu
+function url_router_create_child_context_menu(id, parent_id, title, contexts) {
+  chrome.contextMenus.create({
+    id: id,
+    parentId: parent_id,
+    title: title,
+    contexts: contexts
+  });
+}
+
+//Provides: url_router_remove_all_context_menus
+function url_router_remove_all_context_menus(callback) {
+  chrome.contextMenus.removeAll(function() {
+    callback();
+  });
+}
+
 //Provides: url_router_on_context_menu_clicked
 function url_router_on_context_menu_clicked(callback) {
   chrome.contextMenus.onClicked.addListener(function(info, tab) {

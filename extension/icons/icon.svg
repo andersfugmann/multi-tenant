@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#4285F4"/>
+      <stop offset="100%" stop-color="#1A56DB"/>
+    </linearGradient>
+  </defs>
+  <!-- Rounded square background -->
+  <rect x="4" y="4" width="120" height="120" rx="24" ry="24" fill="url(#bg)"/>
+  <!-- Incoming arrow shaft (left side) -->
+  <line x1="28" y1="64" x2="60" y2="64" stroke="#fff" stroke-width="8" stroke-linecap="round"/>
+  <!-- Upper branch -->
+  <path d="M 58,64 C 72,64 72,38 86,38" fill="none" stroke="#fff" stroke-width="8" stroke-linecap="round"/>
+  <!-- Lower branch -->
+  <path d="M 58,64 C 72,64 72,90 86,90" fill="none" stroke="#fff" stroke-width="8" stroke-linecap="round"/>
+  <!-- Arrowhead upper -->
+  <polygon points="92,28 104,38 92,48" fill="#fff"/>
+  <!-- Arrowhead lower -->
+  <polygon points="92,80 104,90 92,100" fill="#fff"/>
+  <!-- Small dot at split point -->
+  <circle cx="58" cy="64" r="5" fill="#fff"/>
+</svg>
