@@ -67,6 +67,10 @@ external get_browser_brand_js : unit -> Js.js_string Js.t = "url_router_get_brow
 
 external create_window_js : Js.js_string Js.t -> unit = "url_router_create_window"
 
+external storage_get_js :
+  (Js.js_string Js.t -> Js.js_string Js.t -> unit) Js.callback -> unit
+  = "url_router_storage_get"
+
 (* -- Logging *)
 
 let log msg = log_js (Js.string msg)
@@ -159,6 +163,7 @@ type event =
   | Bridge_message of { raw : string }
   | Port_disconnected
   | Connect_requested
+  | Connect_with_settings of { port : native_port; tenant_name : string; socket_path : string }
   | Context_menu of { menu_id : string; link_url : string; page_url : string }
   | Popup_query of { json : Yojson.Safe.t; respond : Yojson.Safe.t -> unit }
   | Setup_menus
@@ -203,6 +208,29 @@ let send_command (state : state) (cmd : Protocol.packed_command)
 
 (* -- Connection management *)
 
+let connect_with_settings (port : native_port) (tenant_name : string) (socket_path : string) : state =
+  let brand = Js.to_string (get_browser_brand_js ()) in
+  log (Printf.sprintf "Browser brand: %s, tenant: %s, socket: %s" brand
+    (match String.is_empty tenant_name with true -> "(default)" | false -> tenant_name)
+    (match String.is_empty socket_path with true -> "(default)" | false -> socket_path));
+  let state = { native_port = Some port; pending_callbacks = []; tenant_names = [] } in
+  (* Build Wire.Register directly to include socket/name overrides *)
+  let register_wire : Protocol.Wire.command =
+    Register {
+      brand;
+      socket = (match String.is_empty socket_path with true -> None | false -> Some socket_path);
+      name = (match String.is_empty tenant_name with true -> None | false -> Some tenant_name);
+    }
+  in
+  let json = Protocol.Wire.command_to_yojson register_wire in
+  let state = send_to_bridge state json (fun _wire_resp -> ()) in
+  send_command state (Command Get_config) (fun wire_resp ->
+      match Protocol.response_of_wire Get_config wire_resp with
+      | Ok cfg ->
+        push (Refresh_menus { tenants = List.map cfg.tenants ~f:fst })
+      | Error msg ->
+        log (Printf.sprintf "Config fetch for menus failed: %s" msg))
+
 let connect (_state : state) : state =
   match
     let p = connect_native_js () in
@@ -215,18 +243,13 @@ let connect (_state : state) : state =
     p
   with
   | p ->
-    let brand = Js.to_string (get_browser_brand_js ()) in
-    log (Printf.sprintf "Browser brand: %s" brand);
-    let state = { native_port = Some p; pending_callbacks = []; tenant_names = [] } in
-    let state =
-      send_command state (Command (Register brand)) (fun _wire_resp -> ())
-    in
-    send_command state (Command Get_config) (fun wire_resp ->
-        match Protocol.response_of_wire Get_config wire_resp with
-        | Ok cfg ->
-          push (Refresh_menus { tenants = List.map cfg.tenants ~f:fst })
-        | Error msg ->
-          log (Printf.sprintf "Config fetch for menus failed: %s" msg))
+    (* Read extension settings, then finish connecting *)
+    storage_get_js (Js.wrap_callback (fun name socket ->
+        let tenant_name = Js.to_string name in
+        let socket_path = Js.to_string socket in
+        push (Connect_with_settings { port = p; tenant_name; socket_path })));
+    (* Return state with port connected but no Register sent yet *)
+    { native_port = Some p; pending_callbacks = []; tenant_names = [] }
   | exception exn ->
     log (Printf.sprintf "Failed to connect: %s" (Exn.to_string exn));
     initial_state
@@ -432,6 +455,8 @@ let handle_event (state : state) (event : event) : state =
     log "Native port disconnected";
     initial_state
   | Connect_requested -> connect state
+  | Connect_with_settings { port; tenant_name; socket_path } ->
+    connect_with_settings port tenant_name socket_path
   | Context_menu { menu_id; link_url; page_url } ->
     handle_context_menu state menu_id link_url page_url
   | Popup_query { json; respond } -> handle_popup_query state json respond

@@ -50,3 +50,8 @@ document.getElementById("btnReconnect").addEventListener("click", function() {
     showInfo("Reconnection attempted");
   });
 });
+
+document.getElementById("btnOptions").addEventListener("click", function() {
+  chrome.runtime.openOptionsPage();
+  window.close();
+});

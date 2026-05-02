@@ -255,7 +255,7 @@ let deserialize_push (line : string) : (packed_server_push, string) Result.t =
 
 module Wire = struct
   type command =
-    | Register of { brand : string }
+    | Register of { brand : string; socket : string option [@default None]; name : string option [@default None] }
     | Open of { url : string }
     | Open_on of { target : string; url : string }
     | Test of { url : string }
@@ -287,7 +287,7 @@ end
 (* -- Wire type conversions *)
 
 let command_to_wire : type a. a command -> Wire.command = function
-  | Register brand -> Register { brand }
+  | Register brand -> Register { brand; socket = None; name = None }
   | Open url -> Open { url }
   | Open_on (target, url) -> Open_on { target; url }
   | Test url -> Test { url }
@@ -300,7 +300,7 @@ let command_to_wire : type a. a command -> Wire.command = function
 
 let command_of_wire (w : Wire.command) : packed_command =
   match w with
-  | Register { brand } -> Command (Register brand)
+  | Register { brand; _ } -> Command (Register brand)
   | Open { url } -> Command (Open url)
   | Open_on { target; url } -> Command (Open_on (target, url))
   | Test { url } -> Command (Test url)

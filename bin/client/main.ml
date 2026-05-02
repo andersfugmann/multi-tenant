@@ -20,61 +20,83 @@ type cli_mode =
   | Bridge
   | Register_stream
 
-let parse_cli (argv : string array) : cli_mode =
-  let args = Array.to_list argv |> List.tl_exn in
-  match args with
-  | [ "--bridge" ] -> Bridge
-  | "open" :: [ url ] -> Cli_command (Command (Open url))
-  | "open-on" :: target :: [ url ] ->
-    Cli_command (Command (Open_on (target, url)))
-  | "test" :: [ url ] -> Cli_command (Command (Test url))
-  | [ "get-config" ] -> Cli_command (Command Get_config)
-  | "set-config" :: [ json_file ] ->
-    let content = In_channel.read_all json_file in
-    (match
-       Result.bind (Protocol.parse_json_string content) ~f:Protocol.config_of_yojson
-     with
-     | Ok cfg -> Cli_command (Command (Set_config cfg))
-     | Error msg -> failwith (Printf.sprintf "invalid config JSON: %s" msg))
-  | "add-rule" :: [ json_str ] ->
-    (match
-       Result.bind (Protocol.parse_json_string json_str) ~f:Protocol.rule_of_yojson
-     with
-     | Ok rule -> Cli_command (Command (Add_rule rule))
-     | Error msg -> failwith (Printf.sprintf "invalid rule JSON: %s" msg))
-  | "update-rule" :: idx_str :: [ json_str ] ->
-    let idx =
-      match Int.of_string_opt idx_str with
-      | Some i -> i
-      | None -> failwith (Printf.sprintf "invalid index: %s" idx_str)
-    in
-    (match
-       Result.bind (Protocol.parse_json_string json_str) ~f:Protocol.rule_of_yojson
-     with
-     | Ok rule -> Cli_command (Command (Update_rule (idx, rule)))
-     | Error msg -> failwith (Printf.sprintf "invalid rule JSON: %s" msg))
-  | "delete-rule" :: [ idx_str ] ->
-    (match Int.of_string_opt idx_str with
-     | Some idx -> Cli_command (Command (Delete_rule idx))
-     | None -> failwith (Printf.sprintf "invalid index: %s" idx_str))
-  | [ "status" ] -> Cli_command (Command Status)
-  | [ "register" ] -> Register_stream
-  | _ ->
-    eprintf
-      "Usage: url-router-client <command> [args]\n\
-       Commands:\n\
-      \  open <url>\n\
-      \  open-on <target> <url>\n\
-      \  test <url>\n\
-      \  get-config\n\
-      \  set-config <json-file>\n\
-      \  add-rule <json>\n\
-      \  update-rule <index> <json>\n\
-      \  delete-rule <index>\n\
-      \  status\n\
-      \  register\n\
-      \  --bridge\n";
-    Stdlib.exit 1
+type cli_options = {
+  mode : cli_mode;
+  socket : string option;
+  name : string option;
+}
+
+let extract_options (args : string list) : string option * string option * string list =
+  let rec loop sock name acc = function
+    | "--socket" :: v :: rest -> loop (Some v) name acc rest
+    | "--name" :: v :: rest -> loop sock (Some v) acc rest
+    | x :: rest -> loop sock name (x :: acc) rest
+    | [] -> (sock, name, List.rev acc)
+  in
+  loop None None [] args
+
+let parse_cli (argv : string array) : cli_options =
+  let all_args = Array.to_list argv |> List.tl_exn in
+  let (socket, name, args) = extract_options all_args in
+  let mode =
+    match args with
+    | [ "--bridge" ] -> Bridge
+    | "open" :: [ url ] -> Cli_command (Command (Open url))
+    | "open-on" :: target :: [ url ] ->
+      Cli_command (Command (Open_on (target, url)))
+    | "test" :: [ url ] -> Cli_command (Command (Test url))
+    | [ "get-config" ] -> Cli_command (Command Get_config)
+    | "set-config" :: [ json_file ] ->
+      let content = In_channel.read_all json_file in
+      (match
+         Result.bind (Protocol.parse_json_string content) ~f:Protocol.config_of_yojson
+       with
+       | Ok cfg -> Cli_command (Command (Set_config cfg))
+       | Error msg -> failwith (Printf.sprintf "invalid config JSON: %s" msg))
+    | "add-rule" :: [ json_str ] ->
+      (match
+         Result.bind (Protocol.parse_json_string json_str) ~f:Protocol.rule_of_yojson
+       with
+       | Ok rule -> Cli_command (Command (Add_rule rule))
+       | Error msg -> failwith (Printf.sprintf "invalid rule JSON: %s" msg))
+    | "update-rule" :: idx_str :: [ json_str ] ->
+      let idx =
+        match Int.of_string_opt idx_str with
+        | Some i -> i
+        | None -> failwith (Printf.sprintf "invalid index: %s" idx_str)
+      in
+      (match
+         Result.bind (Protocol.parse_json_string json_str) ~f:Protocol.rule_of_yojson
+       with
+       | Ok rule -> Cli_command (Command (Update_rule (idx, rule)))
+       | Error msg -> failwith (Printf.sprintf "invalid rule JSON: %s" msg))
+    | "delete-rule" :: [ idx_str ] ->
+      (match Int.of_string_opt idx_str with
+       | Some idx -> Cli_command (Command (Delete_rule idx))
+       | None -> failwith (Printf.sprintf "invalid index: %s" idx_str))
+    | [ "status" ] -> Cli_command (Command Status)
+    | [ "register" ] -> Register_stream
+    | _ ->
+      eprintf
+        "Usage: url-router-client [options] <command> [args]\n\
+         Options:\n\
+        \  --socket <path>   Override socket path\n\
+        \  --name <tenant>   Override tenant name\n\
+         Commands:\n\
+        \  open <url>\n\
+        \  open-on <target> <url>\n\
+        \  test <url>\n\
+        \  get-config\n\
+        \  set-config <json-file>\n\
+        \  add-rule <json>\n\
+        \  update-rule <index> <json>\n\
+        \  delete-rule <index>\n\
+        \  status\n\
+        \  register\n\
+        \  --bridge\n";
+      Stdlib.exit 1
+  in
+  { mode; socket; name }
 
 (* Format response as human-readable CLI output *)
 
@@ -117,10 +139,10 @@ let send_command_cli :
     type a.
     net:_ Eio.Net.ty Eio.Resource.t ->
     tenant:string ->
+    sock_path:string ->
     a Protocol.command ->
     string =
- fun ~net ~tenant cmd ->
-  let sock_path = socket_path () in
+ fun ~net ~tenant ~sock_path cmd ->
   Eio.Switch.run @@ fun sw ->
   let flow =
     Eio.Net.connect ~sw net (`Unix sock_path)
@@ -135,9 +157,7 @@ let send_command_cli :
 
 (* -- CLI register: stay connected, print pushes *)
 
-let run_register ~net =
-  let sock_path = socket_path () in
-  let tenant = hostname () in
+let run_register ~net ~sock_path ~tenant =
   Eio.Switch.run @@ fun sw ->
   let flow =
     Eio.Net.connect ~sw net (`Unix sock_path)
@@ -203,10 +223,10 @@ let bridge_send_command :
     type a.
     net:_ Eio.Net.ty Eio.Resource.t ->
     tenant:string ->
+    sock_path:string ->
     a Protocol.command ->
     Protocol.Wire.response =
- fun ~net ~tenant cmd ->
-  let sock_path = socket_path () in
+ fun ~net ~tenant ~sock_path cmd ->
   match
     Eio.Switch.run @@ fun sw ->
     let flow =
@@ -226,7 +246,7 @@ let bridge_send_command :
 
 (* -- Bridge: command fiber *)
 
-let bridge_command_fiber ~net ~tenant ~stdin_flow
+let bridge_command_fiber ~net ~tenant ~sock_path ~stdin_flow
     ~(write_out : Yojson.Safe.t -> unit) : unit =
   let rec loop () =
     match read_native_message stdin_flow with
@@ -235,7 +255,7 @@ let bridge_command_fiber ~net ~tenant ~stdin_flow
       let wire_response =
         match Protocol.deserialize_command_json json with
         | Error msg -> Protocol.Wire.Err { message = msg }
-        | Ok (Command cmd) -> bridge_send_command ~net ~tenant cmd
+        | Ok (Command cmd) -> bridge_send_command ~net ~tenant ~sock_path cmd
       in
       let bridge_msg = Protocol.Wire.(bridge_message_to_yojson (Response wire_response)) in
       write_out bridge_msg;
@@ -245,9 +265,8 @@ let bridge_command_fiber ~net ~tenant ~stdin_flow
 
 (* -- Bridge: push fiber (connect once, no retry) *)
 
-let bridge_push_fiber ~net ~tenant ~brand
+let bridge_push_fiber ~net ~tenant ~brand ~sock_path
     ~(write_out : Yojson.Safe.t -> unit) : unit =
-  let sock_path = socket_path () in
   match
     Eio.Switch.run @@ fun sw ->
     let flow =
@@ -281,7 +300,7 @@ let bridge_push_fiber ~net ~tenant ~brand
 
 let run_bridge env =
   let net = Eio.Stdenv.net env in
-  let tenant = hostname () in
+  let default_tenant = hostname () in
   let stdout_mutex = Eio.Mutex.create () in
   let stdout_flow = Eio.Stdenv.stdout env in
   let stdin_flow = Eio.Stdenv.stdin env in
@@ -289,29 +308,39 @@ let run_bridge env =
     Eio.Mutex.use_rw ~protect:true stdout_mutex (fun () ->
         write_native_message stdout_flow json)
   in
-  (* Read first message from extension: Register with brand *)
-  let brand =
+  (* Read first message from extension: Register with brand and optional overrides *)
+  let (brand, tenant, sock_override) =
     match read_native_message stdin_flow with
     | Some json ->
-      (match Protocol.deserialize_command_json json with
-       | Ok (Command (Register brand)) ->
+      (match Protocol.Wire.command_of_yojson json with
+       | Ok (Register { brand; socket; name }) ->
          let resp = Protocol.bridge_response_to_yojson (Register brand) (Ok ()) in
          write_out resp;
-         brand
+         let tenant =
+           match name with
+           | Some n when not (String.is_empty n) -> n
+           | _ -> default_tenant
+         in
+         (brand, tenant, socket)
        | _ ->
          let resp = Protocol.Wire.(bridge_message_to_yojson
            (Response (Err { message = "expected Register as first message" }))) in
          write_out resp;
-         "")
-    | None -> ""
+         ("", default_tenant, None))
+    | None -> ("", default_tenant, None)
+  in
+  let sock_path =
+    match sock_override with
+    | Some s when not (String.is_empty s) -> s
+    | _ -> socket_path ()
   in
   Eio.Fiber.both
     (fun () ->
-      bridge_command_fiber ~net ~tenant
+      bridge_command_fiber ~net ~tenant ~sock_path
         ~stdin_flow
         ~write_out)
     (fun () ->
-      bridge_push_fiber ~net ~tenant ~brand
+      bridge_push_fiber ~net ~tenant ~brand ~sock_path
         ~write_out)
 
 (* -- Detect if running as native messaging host *)
@@ -326,19 +355,31 @@ let () =
   let argv = Sys.get_argv () in
   (* Detect bridge mode: explicit --bridge flag, chrome-extension:// origin arg,
      or stdin is not a terminal *)
-  let mode =
+  let { mode; socket; name } =
     match Array.length argv with
     | 1 ->
       (match is_terminal () with
        | true -> parse_cli argv
-       | false -> Bridge)
-    | 2 when String.is_prefix (Array.get argv 1) ~prefix:"chrome-extension://" -> Bridge
+       | false -> { mode = Bridge; socket = None; name = None })
+    | 2 when String.is_prefix (Array.get argv 1) ~prefix:"chrome-extension://" ->
+      { mode = Bridge; socket = None; name = None }
     | _ -> parse_cli argv
+  in
+  let resolve_socket () =
+    match socket with
+    | Some s -> s
+    | None -> socket_path ()
+  in
+  let resolve_tenant default =
+    match name with
+    | Some n -> n
+    | None -> default
   in
   match mode with
   | Bridge -> run_bridge env
-  | Register_stream -> run_register ~net
+  | Register_stream ->
+    run_register ~net ~sock_path:(resolve_socket ()) ~tenant:(resolve_tenant (hostname ()))
   | Cli_command (Command cmd) ->
-    let tenant = "default" in
-    let output = send_command_cli ~net ~tenant cmd in
+    let tenant = resolve_tenant "default" in
+    let output = send_command_cli ~net ~tenant ~sock_path:(resolve_socket ()) cmd in
     print_endline output

@@ -306,9 +306,12 @@
   <div class="app">
     <header>
       <h1>🔀 URL Router</h1>
-      <div class="status-badge">
-        <span class="dot" id="statusDot"></span>
-        <span id="statusText">Connecting…</span>
+      <div style="display:flex; align-items:center; gap:12px;">
+        <div class="status-badge">
+          <span class="dot" id="statusDot"></span>
+          <span id="statusText">Connecting…</span>
+        </div>
+        <button class="btn btn-sm" onclick="window.close()">✕ Close</button>
       </div>
     </header>
 

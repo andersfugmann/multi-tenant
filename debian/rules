@@ -8,7 +8,7 @@ EXT_ID := dihkhgdagigaecpjlbfbiecpocnbeheh
 override_dh_auto_build:
 	dune build --profile release bin/server/main.exe bin/client/main.exe extension/main.bc.js
 	mkdir -p _build/ext-staging/icons
-	cp extension/manifest.json extension/popup.html extension/popup.js extension/add_rule.html extension/add_rule.js extension/config.html extension/config.js _build/ext-staging/
+	cp extension/manifest.json extension/popup.html extension/popup.js extension/add_rule.html extension/add_rule.js extension/config.html extension/config.js extension/options.html extension/options.js _build/ext-staging/
 	cp _build/default/extension/main.bc.js _build/ext-staging/main.js
 	cp extension/icons/* _build/ext-staging/icons/
 	cd extension && npx crx3 ../_build/ext-staging \

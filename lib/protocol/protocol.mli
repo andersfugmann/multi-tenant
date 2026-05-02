@@ -101,7 +101,7 @@ val deserialize_push : string -> (packed_server_push, string) Result.t
 
 module Wire : sig
   type command =
-    | Register of { brand : string }
+    | Register of { brand : string; socket : string option [@default None]; name : string option [@default None] }
     | Open of { url : string }
     | Open_on of { target : string; url : string }
     | Test of { url : string }

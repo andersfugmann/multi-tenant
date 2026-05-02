@@ -140,3 +140,12 @@ function url_router_create_window(url) {
 function url_router_set_timeout(callback, ms) {
   setTimeout(callback, ms);
 }
+
+//Provides: url_router_storage_get
+function url_router_storage_get(callback) {
+  chrome.storage.local.get(["tenant_name", "socket_path"], function(items) {
+    var name = items.tenant_name || "";
+    var socket = items.socket_path || "";
+    callback(name, socket);
+  });
+}
