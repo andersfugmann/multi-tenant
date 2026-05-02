@@ -203,7 +203,7 @@ let bridge_send_command :
     net:_ Eio.Net.ty Eio.Resource.t ->
     tenant:string ->
     a Protocol.command ->
-    Yojson.Safe.t =
+    Protocol.Wire.response =
  fun ~net ~tenant cmd ->
   let sock_path = socket_path () in
   match
@@ -217,15 +217,11 @@ let bridge_send_command :
     let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
     let response_line = Eio.Buf_read.line reader in
     Protocol.deserialize_response cmd response_line
-    |> Protocol.serialize_response_json cmd
+    |> Protocol.response_to_wire cmd
   with
-  | json -> json
+  | wire -> wire
   | exception exn ->
-    `Assoc
-      [
-        ("status", `String "error");
-        ("message", `String (Exn.to_string exn));
-      ]
+    Protocol.Wire.Err { message = Exn.to_string exn }
 
 (* -- Bridge: command fiber *)
 
@@ -235,21 +231,13 @@ let bridge_command_fiber ~net ~tenant ~stdin_flow
     match read_native_message stdin_flow with
     | None -> ()
     | Some json ->
-      let response_json =
+      let wire_response =
         match Protocol.deserialize_command_json json with
-        | Error msg ->
-          Protocol.bridge_message_to_yojson
-            (Response
-               (`Assoc
-                 [
-                   ("status", `String "error");
-                   ("message", `String msg);
-                 ]))
-        | Ok (Command cmd) ->
-          let resp = bridge_send_command ~net ~tenant cmd in
-          Protocol.bridge_message_to_yojson (Response resp)
+        | Error msg -> Protocol.Wire.Err { message = msg }
+        | Ok (Command cmd) -> bridge_send_command ~net ~tenant cmd
       in
-      write_out response_json;
+      let bridge_msg = Protocol.Wire.(bridge_message_to_yojson (Response wire_response)) in
+      write_out bridge_msg;
       loop ()
   in
   loop ()
@@ -280,7 +268,7 @@ let bridge_push_fiber ~net ~tenant ~clock
          let push_line = Eio.Buf_read.line reader in
          (match Protocol.deserialize_push push_line with
           | Ok push ->
-            let msg = Protocol.bridge_message_to_yojson (Push push) in
+            let msg = Protocol.bridge_push_to_yojson push in
             write_out msg
           | Error _msg -> ());
          read_loop ()

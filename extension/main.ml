@@ -68,6 +68,16 @@ let json_of_string (s : string) : (Yojson.Safe.t, string) Result.t =
 let json_to_string (json : Yojson.Safe.t) : string =
   Yojson.Safe.to_string json
 
+let string_field (json : Yojson.Safe.t) (key : string) :
+    (string, string) Result.t =
+  match json with
+  | `Assoc pairs ->
+    (match List.Assoc.find pairs ~equal:String.equal key with
+     | Some (`String s) -> Ok s
+     | Some _ -> Error (Printf.sprintf "field %s: expected string" key)
+     | None -> Error (Printf.sprintf "missing field: %s" key))
+  | _ -> Error "expected JSON object"
+
 (* -- Typed wrappers around Chrome APIs *)
 
 let create_tab (url : string) : unit = create_tab_js (Js.string url)
@@ -110,28 +120,16 @@ type native_port
 type connection_state = {
   mutable native_port : native_port option;
   mutable connected : bool;
-  mutable pending_callbacks : (Yojson.Safe.t -> unit) list;
+  mutable pending_callbacks : (Protocol.Wire.response -> unit) list;
 }
 
 let state =
   { native_port = None; connected = false; pending_callbacks = [] }
 
-(* -- JSON field accessor (protocol's string_field is internal) *)
-
-let string_field (json : Yojson.Safe.t) (key : string) :
-    (string, string) Result.t =
-  match json with
-  | `Assoc pairs ->
-    (match List.Assoc.find pairs ~equal:String.equal key with
-     | Some (`String s) -> Ok s
-     | Some _ -> Error (Printf.sprintf "field %s: expected string" key)
-     | None -> Error (Printf.sprintf "missing field: %s" key))
-  | _ -> Error "expected JSON object"
-
 (* -- Native messaging *)
 
 let send_to_bridge (json : Yojson.Safe.t)
-    (on_response : Yojson.Safe.t -> unit) : unit =
+    (on_response : Protocol.Wire.response -> unit) : unit =
   match state.native_port with
   | None -> log "No native port connected"
   | Some p ->
@@ -140,7 +138,7 @@ let send_to_bridge (json : Yojson.Safe.t)
     port_post_message_json_js p (Js.string (json_to_string json))
 
 let send_command (cmd : Protocol.packed_command)
-    (on_response : Yojson.Safe.t -> unit) : unit =
+    (on_response : Protocol.Wire.response -> unit) : unit =
   let (Protocol.Command c) = cmd in
   let json = Protocol.serialize_command_json c in
   send_to_bridge json on_response
@@ -151,13 +149,13 @@ let handle_bridge_message (msg_str : Js.js_string Js.t) : unit =
   | Error msg -> log (Printf.sprintf "Failed to parse bridge JSON: %s" msg)
   | Ok json ->
     (match Protocol.bridge_message_of_yojson json with
-     | Ok (Protocol.Response data) ->
+     | Ok (Protocol.Wire.Response wire_resp) ->
        (match state.pending_callbacks with
         | [] -> log "Received response with no pending callback"
         | cb :: rest ->
           state.pending_callbacks <- rest;
-          cb data)
-     | Ok (Protocol.Push (Protocol.Push (Protocol.Navigate url))) ->
+          cb wire_resp)
+     | Ok (Protocol.Wire.Push (Protocol.Wire.Navigate { url })) ->
        log (Printf.sprintf "Received NAVIGATE push: %s" url);
        create_tab url
      | Error msg ->
@@ -191,11 +189,8 @@ let handle_navigation (url : string) (_tab_id : int) (frame_id : int)
        (match state.connected with
         | false -> ()
         | true ->
-          send_command (Command (Open url)) (fun response_json ->
-            match
-              Protocol.deserialize_response_json (Open url)
-                response_json
-            with
+          send_command (Command (Open url)) (fun wire_resp ->
+            match Protocol.response_of_wire (Open url) wire_resp with
             | Ok Local -> ()
             | Ok (Remote tid) ->
               log
@@ -257,20 +252,20 @@ let rec handle_popup_message (msg_str : Js.js_string Js.t)
                    | false -> "Not connected to native host") );
             ])
      | Ok "query_status" ->
-       send_command (Command Status) (fun data ->
+       send_command (Command Status) (fun wire_resp ->
            send
              (`Assoc
                 [
                   ("connected", `Bool state.connected);
-                  ("data", data);
+                  ("data", Protocol.Wire.response_to_yojson wire_resp);
                 ]))
      | Ok "query_config" ->
-       send_command (Command Get_config) (fun data ->
+       send_command (Command Get_config) (fun wire_resp ->
            send
              (`Assoc
                 [
                   ("connected", `Bool state.connected);
-                  ("data", data);
+                  ("data", Protocol.Wire.response_to_yojson wire_resp);
                 ]))
      | Ok "reconnect" ->
        connect_to_native ();

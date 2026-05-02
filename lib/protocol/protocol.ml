@@ -288,233 +288,152 @@ let deserialize_push (line : string) : (packed_server_push, string) Result.t =
   | "NAVIGATE" -> Ok (Push (Navigate rest))
   | other -> Error (Printf.sprintf "unknown push: %s" other)
 
+(* -- JSON wire types *)
+
+module Wire = struct
+  type command =
+    | Register
+    | Open of { url : string }
+    | Open_on of { target : string; url : string }
+    | Test of { url : string }
+    | Get_config
+    | Set_config of { config : config }
+    | Add_rule of { rule : rule }
+    | Update_rule of { index : int; rule : rule }
+    | Delete_rule of { index : int }
+    | Status
+  [@@deriving yojson]
+
+  type response =
+    | Ok_unit
+    | Ok_route of route_result
+    | Ok_test of test_result
+    | Ok_config of config
+    | Ok_status of status_info
+    | Err of { message : string }
+  [@@deriving yojson]
+
+  type push = Navigate of { url : string } [@@deriving yojson]
+
+  type bridge_message =
+    | Response of response
+    | Push of push
+  [@@deriving yojson]
+end
+
+(* -- Wire type conversions *)
+
+let command_to_wire : type a. a command -> Wire.command = function
+  | Register -> Register
+  | Open url -> Open { url }
+  | Open_on (target, url) -> Open_on { target; url }
+  | Test url -> Test { url }
+  | Get_config -> Get_config
+  | Set_config cfg -> Set_config { config = cfg }
+  | Add_rule r -> Add_rule { rule = r }
+  | Update_rule (idx, r) -> Update_rule { index = idx; rule = r }
+  | Delete_rule idx -> Delete_rule { index = idx }
+  | Status -> Status
+
+let command_of_wire (w : Wire.command) : packed_command =
+  match w with
+  | Register -> Command Register
+  | Open { url } -> Command (Open url)
+  | Open_on { target; url } -> Command (Open_on (target, url))
+  | Test { url } -> Command (Test url)
+  | Get_config -> Command Get_config
+  | Set_config { config } -> Command (Set_config config)
+  | Add_rule { rule } -> Command (Add_rule rule)
+  | Update_rule { index; rule } -> Command (Update_rule (index, rule))
+  | Delete_rule { index } -> Command (Delete_rule index)
+  | Status -> Command Status
+
+let response_to_wire : type a. a command -> (a, string) Result.t -> Wire.response =
+ fun cmd resp ->
+  match resp with
+  | Error msg -> Err { message = msg }
+  | Ok value ->
+    (match cmd with
+     | Register -> Ok_unit
+     | Open _ -> Ok_route value
+     | Open_on _ -> Ok_route value
+     | Test _ -> Ok_test value
+     | Get_config -> Ok_config value
+     | Set_config _ -> Ok_unit
+     | Add_rule _ -> Ok_unit
+     | Update_rule _ -> Ok_unit
+     | Delete_rule _ -> Ok_unit
+     | Status -> Ok_status value)
+
+let response_of_wire : type a. a command -> Wire.response -> (a, string) Result.t =
+ fun cmd wire ->
+  match wire with
+  | Err { message } -> Error message
+  | Ok_unit ->
+    (match cmd with
+     | Register -> Ok ()
+     | Set_config _ -> Ok ()
+     | Add_rule _ -> Ok ()
+     | Update_rule _ -> Ok ()
+     | Delete_rule _ -> Ok ()
+     | _ -> Error "unexpected Ok_unit for this command")
+  | Ok_route r ->
+    (match cmd with
+     | Open _ -> Ok r
+     | Open_on _ -> Ok r
+     | _ -> Error "unexpected Ok_route for this command")
+  | Ok_test t ->
+    (match cmd with
+     | Test _ -> Ok t
+     | _ -> Error "unexpected Ok_test for this command")
+  | Ok_config c ->
+    (match cmd with
+     | Get_config -> Ok c
+     | _ -> Error "unexpected Ok_config for this command")
+  | Ok_status s ->
+    (match cmd with
+     | Status -> Ok s
+     | _ -> Error "unexpected Ok_status for this command")
+
 (* -- JSON serialization: commands *)
 
 let serialize_command_json : type a. a command -> Yojson.Safe.t =
- fun cmd ->
-  match cmd with
-  | Register -> `Assoc [ ("command", `String "register") ]
-  | Open url ->
-    `Assoc [ ("command", `String "open"); ("url", `String url) ]
-  | Open_on (target, url) ->
-    `Assoc
-      [
-        ("command", `String "open_on");
-        ("target", `String target);
-        ("url", `String url);
-      ]
-  | Test url ->
-    `Assoc [ ("command", `String "test"); ("url", `String url) ]
-  | Get_config -> `Assoc [ ("command", `String "get_config") ]
-  | Set_config cfg ->
-    `Assoc
-      [
-        ("command", `String "set_config");
-        ("config", config_to_yojson cfg);
-      ]
-  | Add_rule r ->
-    `Assoc
-      [ ("command", `String "add_rule"); ("rule", rule_to_yojson r) ]
-  | Update_rule (idx, r) ->
-    `Assoc
-      [
-        ("command", `String "update_rule");
-        ("index", `Int idx);
-        ("rule", rule_to_yojson r);
-      ]
-  | Delete_rule idx ->
-    `Assoc
-      [ ("command", `String "delete_rule"); ("index", `Int idx) ]
-  | Status -> `Assoc [ ("command", `String "status") ]
-
-let assoc_field (json : Yojson.Safe.t) (key : string) :
-    (Yojson.Safe.t, string) Result.t =
-  match json with
-  | `Assoc pairs ->
-    (match List.Assoc.find pairs ~equal:String.equal key with
-     | Some v -> Ok v
-     | None -> Error (Printf.sprintf "missing field: %s" key))
-  | _ -> Error "expected JSON object"
-
-let string_field (json : Yojson.Safe.t) (key : string) :
-    (string, string) Result.t =
-  match assoc_field json key with
-  | Ok (`String s) -> Ok s
-  | Ok _ -> Error (Printf.sprintf "field %s: expected string" key)
-  | Error e -> Error e
-
-let int_field (json : Yojson.Safe.t) (key : string) :
-    (int, string) Result.t =
-  match assoc_field json key with
-  | Ok (`Int i) -> Ok i
-  | Ok _ -> Error (Printf.sprintf "field %s: expected int" key)
-  | Error e -> Error e
+ fun cmd -> command_to_wire cmd |> Wire.command_to_yojson
 
 let deserialize_command_json (json : Yojson.Safe.t) :
     (packed_command, string) Result.t =
-  match string_field json "command" with
-  | Error e -> Error e
-  | Ok cmd_name ->
-    (match cmd_name with
-     | "register" -> Ok (Command Register)
-     | "open" ->
-       Result.bind (string_field json "url") ~f:(fun url ->
-           Ok (Command (Open url)))
-     | "open_on" ->
-       Result.bind (string_field json "target") ~f:(fun target ->
-           Result.bind (string_field json "url") ~f:(fun url ->
-               Ok (Command (Open_on (target, url)))))
-     | "test" ->
-       Result.bind (string_field json "url") ~f:(fun url ->
-           Ok (Command (Test url)))
-     | "get_config" -> Ok (Command Get_config)
-     | "set_config" ->
-       Result.bind (assoc_field json "config") ~f:(fun cfg_json ->
-           Result.bind (config_of_yojson cfg_json) ~f:(fun cfg ->
-               Ok (Command (Set_config cfg))))
-     | "add_rule" ->
-       Result.bind (assoc_field json "rule") ~f:(fun rule_json ->
-           Result.bind (rule_of_yojson rule_json) ~f:(fun r ->
-               Ok (Command (Add_rule r))))
-     | "update_rule" ->
-       Result.bind (int_field json "index") ~f:(fun idx ->
-           Result.bind (assoc_field json "rule") ~f:(fun rule_json ->
-               Result.bind (rule_of_yojson rule_json) ~f:(fun r ->
-                   Ok (Command (Update_rule (idx, r))))))
-     | "delete_rule" ->
-       Result.bind (int_field json "index") ~f:(fun idx ->
-           Ok (Command (Delete_rule idx)))
-     | "status" -> Ok (Command Status)
-     | other ->
-       Error (Printf.sprintf "unknown command: %s" other))
+  let* wire = Wire.command_of_yojson json in
+  Ok (command_of_wire wire)
 
 (* -- JSON serialization: responses *)
 
 let serialize_response_json :
     type a. a command -> (a, string) Result.t -> Yojson.Safe.t =
- fun cmd resp ->
-  match resp with
-  | Error msg ->
-    `Assoc [ ("status", `String "error"); ("message", `String msg) ]
-  | Ok value ->
-    (match cmd with
-     | Register ->
-       `Assoc [ ("status", `String "ok") ]
-     | Open _ ->
-       `Assoc
-         [
-           ("status", `String "ok");
-           ("result", route_result_to_yojson value);
-         ]
-     | Open_on _ ->
-       `Assoc
-         [
-           ("status", `String "ok");
-           ("result", route_result_to_yojson value);
-         ]
-     | Test _ ->
-       `Assoc
-         [
-           ("status", `String "ok");
-           ("result", test_result_to_yojson value);
-         ]
-     | Get_config ->
-       `Assoc
-         [
-           ("status", `String "ok");
-           ("config", config_to_yojson value);
-         ]
-     | Set_config _ ->
-       `Assoc [ ("status", `String "ok") ]
-     | Add_rule _ ->
-       `Assoc [ ("status", `String "ok") ]
-     | Update_rule _ ->
-       `Assoc [ ("status", `String "ok") ]
-     | Delete_rule _ ->
-       `Assoc [ ("status", `String "ok") ]
-     | Status ->
-       `Assoc
-         [
-           ("status", `String "ok");
-           ("status_info", status_info_to_yojson value);
-         ])
+ fun cmd resp -> response_to_wire cmd resp |> Wire.response_to_yojson
 
 let deserialize_response_json :
     type a. a command -> Yojson.Safe.t -> (a, string) Result.t =
  fun cmd json ->
-  match string_field json "status" with
+  match Wire.response_of_yojson json with
   | Error e -> Error e
-  | Ok "error" ->
-    (match string_field json "message" with
-     | Ok msg -> Error msg
-     | Error e -> Error e)
-  | Ok "ok" ->
-    (match cmd with
-     | Register -> Ok ()
-     | Open _ ->
-       (match assoc_field json "result" with
-        | Error e -> Error e
-        | Ok rj -> route_result_of_yojson rj)
-     | Open_on _ ->
-       (match assoc_field json "result" with
-        | Error e -> Error e
-        | Ok rj -> route_result_of_yojson rj)
-     | Test _ ->
-       (match assoc_field json "result" with
-        | Error e -> Error e
-        | Ok rj -> test_result_of_yojson rj)
-     | Get_config ->
-       (match assoc_field json "config" with
-        | Error e -> Error e
-        | Ok cj -> config_of_yojson cj)
-     | Set_config _ -> Ok ()
-     | Add_rule _ -> Ok ()
-     | Update_rule _ -> Ok ()
-     | Delete_rule _ -> Ok ()
-     | Status ->
-       (match assoc_field json "status_info" with
-        | Error e -> Error e
-        | Ok sj -> status_info_of_yojson sj))
-  | Ok other ->
-    Error (Printf.sprintf "unknown status: %s" other)
+  | Ok wire -> response_of_wire cmd wire
 
 (* -- Bridge message envelope *)
 
-type bridge_message =
-  | Response of Yojson.Safe.t
-  | Push of packed_server_push
+let bridge_response_to_yojson :
+    type a. a command -> (a, string) Result.t -> Yojson.Safe.t =
+ fun cmd resp ->
+  response_to_wire cmd resp
+  |> fun w -> Wire.bridge_message_to_yojson (Response w)
 
-let bridge_message_to_yojson (msg : bridge_message) : Yojson.Safe.t =
-  match msg with
-  | Response json ->
-    `Assoc [ ("type", `String "response"); ("data", json) ]
-  | Push (Push (Navigate url)) ->
-    `Assoc
-      [
-        ("type", `String "push");
-        ("push_type", `String "navigate");
-        ("url", `String url);
-      ]
+let bridge_push_to_yojson (push : packed_server_push) : Yojson.Safe.t =
+  match push with
+  | Push (Navigate url) ->
+    Wire.bridge_message_to_yojson (Push (Navigate { url }))
 
 let bridge_message_of_yojson (json : Yojson.Safe.t) :
-    (bridge_message, string) Result.t =
-  match string_field json "type" with
-  | Error e -> Error e
-  | Ok "response" ->
-    (match assoc_field json "data" with
-     | Ok data -> Ok (Response data)
-     | Error e -> Error e)
-  | Ok "push" ->
-    (match string_field json "push_type" with
-     | Error e -> Error e
-     | Ok "navigate" ->
-       (match string_field json "url" with
-        | Ok url -> Ok (Push (Push (Navigate url)))
-        | Error e -> Error e)
-     | Ok other ->
-       Error (Printf.sprintf "unknown push_type: %s" other))
-  | Ok other ->
-    Error (Printf.sprintf "unknown bridge message type: %s" other)
+    (Wire.bridge_message, string) Result.t =
+  Wire.bridge_message_of_yojson json
 
 (* Suppress unused open warnings — Stdio is used by convention *)
 let () = ignore (print_endline : string -> unit)
@@ -743,8 +662,9 @@ let%expect_test "json: round-trip register" =
    | Ok (Command Register) -> print_endline "OK"
    | _ -> print_endline "FAIL");
   [%expect {|
-    {"command":"register"}
-    OK |}]
+    ["Register"]
+    OK
+    |}]
 
 let%expect_test "json: round-trip open" =
   let json = serialize_command_json (Open "https://example.com") in
@@ -753,8 +673,9 @@ let%expect_test "json: round-trip open" =
    | Ok (Command (Open url)) -> printf "url=%s\n" url
    | _ -> print_endline "FAIL");
   [%expect {|
-    {"command":"open","url":"https://example.com"}
-    url=https://example.com |}]
+    ["Open",{"url":"https://example.com"}]
+    url=https://example.com
+    |}]
 
 let%expect_test "json: round-trip open_on" =
   let json = serialize_command_json (Open_on ("work", "https://example.com")) in
@@ -806,19 +727,19 @@ let%expect_test "json: round-trip delete_rule" =
 let%expect_test "json: response ok" =
   let json = serialize_response_json Register (Ok ()) in
   print_endline (Yojson.Safe.to_string json);
-  [%expect {| {"status":"ok"} |}]
+  [%expect {| ["Ok_unit"] |}]
 
 let%expect_test "json: response local" =
   let json = serialize_response_json (Open "https://x.com") (Ok Local) in
   print_endline (Yojson.Safe.to_string json);
-  [%expect {| {"status":"ok","result":["Local"]} |}]
+  [%expect {| ["Ok_route",["Local"]] |}]
 
 let%expect_test "json: response remote" =
   let json =
     serialize_response_json (Open "https://x.com") (Ok (Remote "work"))
   in
   print_endline (Yojson.Safe.to_string json);
-  [%expect {| {"status":"ok","result":["Remote","work"]} |}]
+  [%expect {| ["Ok_route",["Remote","work"]] |}]
 
 let%expect_test "json: response match" =
   let json =
@@ -826,7 +747,7 @@ let%expect_test "json: response match" =
       (Ok (Match { tenant = "work"; rule_index = 2 }))
   in
   print_endline (Yojson.Safe.to_string json);
-  [%expect {| {"status":"ok","result":["Match",{"tenant":"work","rule_index":2}]} |}]
+  [%expect {| ["Ok_test",["Match",{"tenant":"work","rule_index":2}]] |}]
 
 let%expect_test "json: response nomatch" =
   let json =
@@ -834,12 +755,12 @@ let%expect_test "json: response nomatch" =
       (Ok (No_match { default_tenant = "personal" }))
   in
   print_endline (Yojson.Safe.to_string json);
-  [%expect {| {"status":"ok","result":["No_match",{"default_tenant":"personal"}]} |}]
+  [%expect {| ["Ok_test",["No_match",{"default_tenant":"personal"}]] |}]
 
 let%expect_test "json: response error" =
   let json = serialize_response_json Register (Error "bad request") in
   print_endline (Yojson.Safe.to_string json);
-  [%expect {| {"status":"error","message":"bad request"} |}]
+  [%expect {| ["Err",{"message":"bad request"}] |}]
 
 let%expect_test "json: round-trip response config" =
   let cmd = Get_config in
@@ -860,24 +781,21 @@ let%expect_test "json: round-trip response status" =
 (* -- JSON: bridge messages *)
 
 let%expect_test "json: bridge push round-trip" =
-  let msg = Push (Push (Navigate "https://example.com")) in
-  let json = bridge_message_to_yojson msg in
+  let json = bridge_push_to_yojson (Push (Navigate "https://example.com")) in
   print_endline (Yojson.Safe.to_string json);
   (match bridge_message_of_yojson json with
-   | Ok (Push (Push (Navigate url))) -> printf "url=%s\n" url
+   | Ok (Wire.Push (Wire.Navigate { url })) -> printf "url=%s\n" url
    | _ -> print_endline "FAIL");
   [%expect {|
-    {"type":"push","push_type":"navigate","url":"https://example.com"}
+    ["Push",["Navigate",{"url":"https://example.com"}]]
     url=https://example.com |}]
 
 let%expect_test "json: bridge response round-trip" =
-  let data = `Assoc [ ("status", `String "ok") ] in
-  let msg = Response data in
-  let json = bridge_message_to_yojson msg in
+  let json = bridge_response_to_yojson Register (Ok ()) in
   (match bridge_message_of_yojson json with
-   | Ok (Response d) -> print_endline (Yojson.Safe.to_string d)
+   | Ok (Wire.Response Wire.Ok_unit) -> print_endline "ok_unit"
    | _ -> print_endline "FAIL");
-  [%expect {| {"status":"ok"} |}]
+  [%expect {| ok_unit |}]
 
 (* -- Error handling *)
 

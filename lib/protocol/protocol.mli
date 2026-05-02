@@ -96,7 +96,47 @@ val deserialize_response : 'a command -> string -> ('a, string) Result.t
 val serialize_push : 'a server_push -> string
 val deserialize_push : string -> (packed_server_push, string) Result.t
 
-(** {1 JSON serialization — commands} *)
+(** {1 JSON wire types} *)
+
+module Wire : sig
+  type command =
+    | Register
+    | Open of { url : string }
+    | Open_on of { target : string; url : string }
+    | Test of { url : string }
+    | Get_config
+    | Set_config of { config : config }
+    | Add_rule of { rule : rule }
+    | Update_rule of { index : int; rule : rule }
+    | Delete_rule of { index : int }
+    | Status
+  [@@deriving yojson]
+
+  type response =
+    | Ok_unit
+    | Ok_route of route_result
+    | Ok_test of test_result
+    | Ok_config of config
+    | Ok_status of status_info
+    | Err of { message : string }
+  [@@deriving yojson]
+
+  type push = Navigate of { url : string } [@@deriving yojson]
+
+  type bridge_message =
+    | Response of response
+    | Push of push
+  [@@deriving yojson]
+end
+
+(** {1 Wire type conversions} *)
+
+val command_to_wire : 'a command -> Wire.command
+val command_of_wire : Wire.command -> packed_command
+val response_to_wire : 'a command -> ('a, string) Result.t -> Wire.response
+val response_of_wire : 'a command -> Wire.response -> ('a, string) Result.t
+
+(** {1 JSON serialization -- commands} *)
 
 val serialize_command_json : 'a command -> Yojson.Safe.t
 val deserialize_command_json : Yojson.Safe.t -> (packed_command, string) Result.t
@@ -112,11 +152,8 @@ val deserialize_response_json :
 
 val parse_json_string : string -> (Yojson.Safe.t, string) Result.t
 
-(** {1 Bridge message envelope} *)
+(** {1 Bridge message} *)
 
-type bridge_message =
-  | Response of Yojson.Safe.t
-  | Push of packed_server_push
-
-val bridge_message_to_yojson : bridge_message -> Yojson.Safe.t
-val bridge_message_of_yojson : Yojson.Safe.t -> (bridge_message, string) Result.t
+val bridge_response_to_yojson : 'a command -> ('a, string) Result.t -> Yojson.Safe.t
+val bridge_push_to_yojson : packed_server_push -> Yojson.Safe.t
+val bridge_message_of_yojson : Yojson.Safe.t -> (Wire.bridge_message, string) Result.t
