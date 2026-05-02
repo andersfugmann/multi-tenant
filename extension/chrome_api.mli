@@ -5,6 +5,7 @@ type port
 
 val log : string -> unit
 val set_timeout : (unit -> unit) -> int -> unit
+val performance_now : unit -> float
 
 module Port : sig
   val post_message_json : port -> string -> unit

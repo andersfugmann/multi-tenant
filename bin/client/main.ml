@@ -266,7 +266,8 @@ let bridge_command_fiber ~net ~tenant ~sock_path ~stdin_flow
 (* -- Bridge: push fiber (connect once, no retry) *)
 
 let bridge_push_fiber ~net ~tenant ~brand ~sock_path
-    ~(write_out : Yojson.Safe.t -> unit) : unit =
+    ~(write_out : Yojson.Safe.t -> unit)
+    ~(on_registered : unit -> unit) : unit =
   match
     Eio.Switch.run @@ fun sw ->
     let flow =
@@ -280,8 +281,8 @@ let bridge_push_fiber ~net ~tenant ~brand ~sock_path
     let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
     let first_line = Eio.Buf_read.line reader in
     (match Protocol.deserialize_response (Register brand) first_line with
-     | Ok () -> ()
-     | Error _msg -> ());
+     | Ok () -> on_registered ()
+     | Error _msg -> on_registered ());
     let rec read_loop () =
       let push_line = Eio.Buf_read.line reader in
       (match Protocol.deserialize_push push_line with
@@ -294,7 +295,7 @@ let bridge_push_fiber ~net ~tenant ~brand ~sock_path
     read_loop ()
   with
   | () -> ()
-  | exception _exn -> ()
+  | exception _exn -> on_registered ()
 
 (* -- Bridge mode entry point *)
 
@@ -326,14 +327,17 @@ let run_bridge env =
     | None -> (None, default_tenant, None)
   in
   let sock_path = Option.value sock_override ~default:(socket_path ()) in
+  let (registered, resolve_registered) = Eio.Promise.create () in
   Eio.Fiber.both
     (fun () ->
+      Eio.Promise.await registered;
       bridge_command_fiber ~net ~tenant ~sock_path
         ~stdin_flow
         ~write_out)
     (fun () ->
       bridge_push_fiber ~net ~tenant ~brand ~sock_path
-        ~write_out)
+        ~write_out
+        ~on_registered:(fun () -> Eio.Promise.resolve resolve_registered ()))
 
 (* -- Detect if running as native messaging host *)
 

@@ -49,6 +49,16 @@ let safe_stringify (v : _ Js.t) : string =
 let log (msg : string) : unit =
   Console.console##log (Js.string (Printf.sprintf "[url-router] %s" msg))
 
+(* ── performance.now() ───────────────────────────────────────────── *)
+
+class type performance = object
+  method now : Js.number Js.t Js.meth
+end
+
+let performance_now () : float =
+  let perf : performance Js.t = Js.Unsafe.coerce (get global "performance") in
+  Js.float_of_number perf##now
+
 (* ── setTimeout ──────────────────────────────────────────────────── *)
 
 let set_timeout (f : unit -> unit) (ms : int) : unit =

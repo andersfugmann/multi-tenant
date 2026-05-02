@@ -60,7 +60,7 @@ type event =
   | Bridge_message of { raw : string }
   | Port_disconnected
   | Connect_requested
-  | Connect_with_settings of { port : native_port; tenant_name : string; socket_path : string }
+  | Connect_with_settings of { port : native_port; tenant_name : string; socket_path : string; debug_logging : bool }
   | Context_menu of { menu_id : string; link_url : string; page_url : string }
   | Popup_query of { json : Yojson.Safe.t; respond : Yojson.Safe.t -> unit }
   | Setup_menus
@@ -71,6 +71,7 @@ type state = {
   native_port : native_port option;
   pending_callbacks : (Protocol.Wire.response -> unit) list;
   tenant_names : string list;
+  debug_logging : bool;
 }
 
 (* -- Event stream *)
@@ -82,7 +83,12 @@ let push ev = push_event (Some ev)
 
 (* -- State operations (pure) *)
 
-let initial_state = { native_port = None; pending_callbacks = []; tenant_names = [] }
+let initial_state = { native_port = None; pending_callbacks = []; tenant_names = []; debug_logging = false }
+
+let debug (state : state) (msg : string) : unit =
+  match state.debug_logging with
+  | true -> log msg
+  | false -> ()
 
 let is_connected (state : state) : bool =
   Option.is_some state.native_port
@@ -110,7 +116,7 @@ let non_empty (s : string) : string option =
   | true -> None
   | false -> Some s
 
-let connect_with_settings (port : native_port) (tenant_name : string) (socket_path : string) : state =
+let connect_with_settings (port : native_port) (tenant_name : string) (socket_path : string) ~(debug_logging : bool) : state =
   let brand = non_empty (Chrome_api.Navigator.get_browser_brand ()) in
   let name = non_empty tenant_name in
   let socket = non_empty socket_path in
@@ -118,7 +124,7 @@ let connect_with_settings (port : native_port) (tenant_name : string) (socket_pa
     (Option.value brand ~default:"(none)")
     (Option.value name ~default:"(default)")
     (Option.value socket ~default:"(default)"));
-  let state = { native_port = Some port; pending_callbacks = []; tenant_names = [] } in
+  let state = { native_port = Some port; pending_callbacks = []; tenant_names = []; debug_logging } in
   (* Build Wire.Register directly to include socket/name overrides *)
   let register_wire : Protocol.Wire.command =
     Register { brand; socket; name }
@@ -142,7 +148,7 @@ let connect (_state : state) : state =
     p
   with
   | p ->
-    Chrome_api.Storage.get_local [ "tenant_name"; "socket_path" ]
+    Chrome_api.Storage.get_local [ "tenant_name"; "socket_path"; "debug_logging" ]
       ~on_result:(fun pairs ->
         let find k =
           List.Assoc.find pairs ~equal:String.equal k
@@ -154,8 +160,9 @@ let connect (_state : state) : state =
                port = p;
                tenant_name = find "tenant_name";
                socket_path = find "socket_path";
+               debug_logging = String.equal (find "debug_logging") "true";
              }));
-    { native_port = Some p; pending_callbacks = []; tenant_names = [] }
+    { native_port = Some p; pending_callbacks = []; tenant_names = []; debug_logging = false }
   | exception exn ->
     log (Printf.sprintf "Failed to connect: %s" (Exn.to_string exn));
     initial_state
@@ -192,11 +199,15 @@ let handle_navigation (state : state) (url : string) : state =
     (match is_internal_url url with
      | true -> state
      | false ->
+       let t0 = Chrome_api.performance_now () in
+       debug state (Printf.sprintf "→ Open %s" url);
        send_command state (Command (Open url)) (fun wire_resp ->
+           let elapsed = Chrome_api.performance_now () -. t0 in
            match Protocol.response_of_wire (Open url) wire_resp with
-           | Ok Local -> ()
+           | Ok Local ->
+             debug state (Printf.sprintf "← Local (%.1f ms) %s" elapsed url)
            | Ok (Remote tid) ->
-             log (Printf.sprintf "URL %s routed to remote tenant %s" url tid)
+             debug state (Printf.sprintf "← Remote %s (%.1f ms) %s" tid elapsed url)
            | Error msg -> log (Printf.sprintf "Open error: %s" msg)))
 
 let handle_context_menu (state : state) (menu_id : string)
@@ -360,8 +371,8 @@ let handle_event (state : state) (event : event) : state =
     log "Native port disconnected";
     initial_state
   | Connect_requested -> connect state
-  | Connect_with_settings { port; tenant_name; socket_path } ->
-    connect_with_settings port tenant_name socket_path
+  | Connect_with_settings { port; tenant_name; socket_path; debug_logging } ->
+    connect_with_settings port tenant_name socket_path ~debug_logging
   | Context_menu { menu_id; link_url; page_url } ->
     handle_context_menu state menu_id link_url page_url
   | Popup_query { json; respond } -> handle_popup_query state json respond
