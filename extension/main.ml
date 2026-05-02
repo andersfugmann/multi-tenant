@@ -56,7 +56,7 @@ let is_internal_url (url : string) : bool =
 type native_port = Chrome_api.port
 
 type event =
-  | Navigation of { url : string }
+  | Navigation of { url : string; tab_id : int }
   | Bridge_message of { raw : string }
   | Port_disconnected
   | Connect_requested
@@ -192,7 +192,7 @@ let handle_bridge_message (state : state) (raw : string) : state =
        log (Printf.sprintf "Failed to parse bridge message: %s" msg);
        state)
 
-let handle_navigation (state : state) (url : string) : state =
+let handle_navigation (state : state) (url : string) (tab_id : int) : state =
   match is_connected state with
   | false -> state
   | true ->
@@ -207,7 +207,8 @@ let handle_navigation (state : state) (url : string) : state =
            | Ok Local ->
              debug state (Printf.sprintf "← Local (%.1f ms) %s" elapsed url)
            | Ok (Remote tid) ->
-             debug state (Printf.sprintf "← Remote %s (%.1f ms) %s" tid elapsed url)
+             debug state (Printf.sprintf "← Remote %s (%.1f ms) %s" tid elapsed url);
+             Chrome_api.Tabs.remove tab_id
            | Error msg -> log (Printf.sprintf "Open error: %s" msg)))
 
 let handle_context_menu (state : state) (menu_id : string)
@@ -365,7 +366,7 @@ let handle_delete_rule_at (state : state) (index : int) : state =
 
 let handle_event (state : state) (event : event) : state =
   match event with
-  | Navigation { url } -> handle_navigation state url
+  | Navigation { url; tab_id } -> handle_navigation state url tab_id
   | Bridge_message { raw } -> handle_bridge_message state raw
   | Port_disconnected ->
     log "Native port disconnected, reconnecting in 2s…";
@@ -396,9 +397,9 @@ let rec coordinator (state : state) : unit Lwt.t =
 (* -- Chrome event registration *)
 
 let register_chrome_listeners () : unit =
-  on_before_navigate (fun url _tab_id frame_id ->
+  on_before_navigate (fun url tab_id frame_id ->
       match frame_id with
-      | 0 -> push (Navigation { url })
+      | 0 -> push (Navigation { url; tab_id })
       | _ -> ());
   on_context_menu_clicked (fun menu_id link_url page_url ->
       push (Context_menu { menu_id; link_url; page_url }));

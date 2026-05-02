@@ -37,6 +37,7 @@ function createMock() {
     },
     tabs: {
       create: jest.fn(),
+      remove: jest.fn(),
     },
     storage: {
       local: {

@@ -151,6 +151,9 @@ module Tabs = struct
 
   let create_url (url : string) : unit =
     call tabs "create" [| inject (js_obj [ ("url", inject (Js.string url)) ]) |]
+
+  let remove (tab_id : int) : unit =
+    call tabs "remove" [| inject tab_id |]
 end
 
 (* ── Windows ─────────────────────────────────────────────────────── *)

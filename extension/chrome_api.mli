@@ -24,6 +24,7 @@ end
 
 module Tabs : sig
   val create_url : string -> unit
+  val remove : int -> unit
 end
 
 module Windows : sig
