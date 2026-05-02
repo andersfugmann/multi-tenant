@@ -1,0 +1,14 @@
+(executable
+ (name main)
+ (modes js)
+ (libraries protocol js_of_ocaml js_of_ocaml-lwt lwt base yojson)
+ (js_of_ocaml
+  (javascript_files chrome_api.js))
+ (preprocess
+  (pps js_of_ocaml-ppx)))
+
+(rule
+ (target main.js)
+ (deps main.bc.js)
+ (action
+  (copy main.bc.js main.js)))
