@@ -5,7 +5,7 @@
   <title>URL Router</title>
   <style>
     body {
-      width: 280px;
+      width: 300px;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       font-size: 13px;
       margin: 0;
@@ -32,6 +32,7 @@
       width: 8px;
       height: 8px;
       border-radius: 50%;
+      flex-shrink: 0;
       background: #aaa;
     }
     .dot.connected { background: #34a853; }
@@ -51,7 +52,45 @@
       text-align: left;
     }
     button:hover { background: #f1f3f4; }
-    #info { margin-top: 10px; font-size: 12px; color: #5f6368; }
+
+    /* Tenant status panel */
+    #statusPanel {
+      display: none;
+      margin-top: 10px;
+      border-top: 1px solid #dadce0;
+      padding-top: 10px;
+    }
+    #statusPanel h2 {
+      font-size: 13px;
+      font-weight: 600;
+      margin: 0 0 6px 0;
+      color: #5f6368;
+    }
+    .uptime {
+      font-size: 12px;
+      color: #5f6368;
+      margin-bottom: 8px;
+    }
+    .tenant-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    .tenant-list li {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 0;
+      border-bottom: 1px solid #f1f3f4;
+      font-size: 13px;
+    }
+    .tenant-list li:last-child { border-bottom: none; }
+    .tenant-name { font-weight: 500; }
+    .tenant-label {
+      color: #5f6368;
+      font-size: 12px;
+      margin-left: auto;
+    }
   </style>
 </head>
 <body>
@@ -64,9 +103,12 @@
     <button id="btnStatus">📊 View status</button>
     <button id="btnConfig">⚙️ Configure</button>
     <button id="btnReconnect">🔄 Reconnect</button>
-    <button id="btnOptions">🛠️ Extension settings</button>
   </div>
-  <div id="info"></div>
+  <div id="statusPanel">
+    <div class="uptime" id="uptime"></div>
+    <h2>Tenants</h2>
+    <ul class="tenant-list" id="tenantList"></ul>
+  </div>
   <script src="popup.js"></script>
 </body>
 </html>
