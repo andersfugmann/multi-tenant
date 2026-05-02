@@ -1,0 +1,32 @@
+{
+  "socket": "/run/url-router.sock",
+  "tenants": {
+    "host-machine": {
+      "browser_cmd": "chromium",
+      "label": "Host",
+      "color": "#4285F4"
+    },
+    "work-container": {
+      "browser_cmd": "machinectl shell work-container /usr/bin/chromium",
+      "label": "Work",
+      "color": "#EA4335"
+    }
+  },
+  "rules": [
+    {
+      "pattern": "https://github\\.com/.*",
+      "target": "work-container",
+      "enabled": true
+    },
+    {
+      "pattern": "https://mail\\.google\\.com/.*",
+      "target": "host-machine",
+      "enabled": true
+    }
+  ],
+  "defaults": {
+    "unmatched": "local",
+    "cooldown_seconds": 2,
+    "browser_launch_timeout": 10
+  }
+}

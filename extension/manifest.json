@@ -3,7 +3,13 @@
   "name": "URL Router",
   "version": "1.0",
   "description": "Route URLs between multi-tenant browser profiles",
-  "permissions": ["webNavigation", "contextMenus", "nativeMessaging", "tabs", "activeTab"],
+  "permissions": [
+    "webNavigation",
+    "contextMenus",
+    "nativeMessaging",
+    "tabs",
+    "activeTab"
+  ],
   "background": {
     "service_worker": "main.js"
   },
@@ -15,5 +21,6 @@
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
-  }
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApsPleNWyp0Mpeidh94/GjNMW3izEouUP9s8dNB1UCX/wkEKjwa4rJAohicPxGjr1cAOHQQ8hatwlFOs9td7PdL0yrrH4r4U1acA0q0UdYU5LCqlTkk6MXmftw58aO6opmmq+38+z8HAbcrDee8UQnZYn/t7g3BJzW414/Uv/ehhza6kvsLhFk2eI1mJyYh7o/irhGuLibVfxK9gX4guKTAy63LLNNvludwoqqfTch+L8GBdHFcixEOmd+DsAEDuZ6t8NBFZYe0bC9+c8iOd84UlFUDye4KyP96rdTBRohLO2gKntNvs0LxsWRVvBwCTCKxtsIuByX+lEye8aNeKc2wIDAQAB"
 }

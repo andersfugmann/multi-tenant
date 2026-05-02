@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=URL Router
+Comment=Route URLs to the correct browser profile
+Exec=/usr/bin/url-router-client open %u
+Terminal=false
+Type=Application
+MimeType=x-scheme-handler/http;x-scheme-handler/https;
+Categories=Network;WebBrowser;
+Icon=url-router

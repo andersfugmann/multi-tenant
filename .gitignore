@@ -10,3 +10,4 @@ debian/*.substvars
 debian/*.postrm.debhelper
 debian/url-router/
 debian/url-router-client/
+extension/key.pem

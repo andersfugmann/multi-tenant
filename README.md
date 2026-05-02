@@ -96,10 +96,10 @@ Installs:
 - `/usr/bin/url-router-client` — native messaging bridge and CLI
 - Native messaging manifests for Chromium (`/etc/chromium/native-messaging-hosts/`)
   and Edge (`/etc/opt/edge/native-messaging-hosts/`)
-- Browser extension files in `/usr/share/url-router/extension/`
-
-**Load the extension:** Open `chrome://extensions`, enable *Developer mode*,
-and click *Load unpacked* pointing to `/usr/share/url-router/extension/`.
+- The browser extension as a signed `.crx`, auto-installed via Chromium's
+  [external extensions](https://developer.chrome.com/docs/extensions/how-to/distribute/install-extensions-linux)
+  mechanism — no manual loading required
+- A `.desktop` file so the client can be set as the default URL handler
 
 **Expose the socket:** The daemon's Unix socket must be accessible from each
 tenant. For systemd-nspawn containers, bind-mount it:
@@ -114,7 +114,8 @@ Bind=/run/url-router.sock
 
 The daemon reads `~/.config/url-router/config.json` (or a path given as
 the first CLI argument). It watches the file and hot-reloads changes
-every two seconds.
+every two seconds. An example is provided in
+[`config.example.json`](config.example.json).
 
 ```json
 {
@@ -182,6 +183,12 @@ url-router-client delete-rule <index>         # Delete a rule by index
 
 The socket path defaults to `/run/url-router.sock` and can be overridden
 with the `URL_ROUTER_SOCKET` environment variable.
+
+To use `url-router-client` as the default URL handler:
+
+```bash
+xdg-settings set default-web-browser url-router-client.desktop
+```
 
 ### Browser Extension
 

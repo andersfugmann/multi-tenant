@@ -4,6 +4,6 @@
   "path": "/usr/bin/url-router-client",
   "type": "stdio",
   "allowed_origins": [
-    "chrome-extension://url-router/"
+    "chrome-extension://dihkhgdagigaecpjlbfbiecpocnbeheh/"
   ]
 }

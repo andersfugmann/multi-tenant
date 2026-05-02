@@ -1,10 +1,18 @@
 #!/usr/bin/make -f
 
+EXT_ID := dihkhgdagigaecpjlbfbiecpocnbeheh
+
 %:
 	dh $@
 
 override_dh_auto_build:
 	dune build --profile release bin/server/main.exe bin/client/main.exe extension/main.bc.js
+	mkdir -p _build/ext-staging/icons
+	cp extension/manifest.json extension/popup.html extension/popup.js _build/ext-staging/
+	cp _build/default/extension/main.bc.js _build/ext-staging/main.js
+	cp extension/icons/* _build/ext-staging/icons/
+	cd extension && npx crx3 ../_build/ext-staging \
+		--crxPath ../_build/extension.crx --keyPath key.pem
 
 override_dh_auto_test:
 
@@ -17,20 +25,22 @@ override_dh_auto_install:
 		debian/url-router-client/etc/chromium/native-messaging-hosts/url_router.json
 	install -D -m 644 debian/url_router.json \
 		debian/url-router-client/etc/opt/edge/native-messaging-hosts/url_router.json
-	install -d debian/url-router-client/usr/share/url-router/extension/icons
-	install -m 644 extension/manifest.json \
-		debian/url-router-client/usr/share/url-router/extension/
-	install -m 644 extension/popup.html \
-		debian/url-router-client/usr/share/url-router/extension/
-	install -m 644 extension/popup.js \
-		debian/url-router-client/usr/share/url-router/extension/
-	install -m 644 _build/default/extension/main.bc.js \
-		debian/url-router-client/usr/share/url-router/extension/main.js
-	install -m 644 extension/icons/* \
-		debian/url-router-client/usr/share/url-router/extension/icons/
+	install -D -m 644 _build/extension.crx \
+		debian/url-router-client/usr/share/url-router/extension.crx
+	install -D -m 644 debian/$(EXT_ID).json \
+		debian/url-router-client/usr/share/chromium/extensions/$(EXT_ID).json
+	install -D -m 644 debian/$(EXT_ID).json \
+		debian/url-router-client/usr/share/google-chrome/extensions/$(EXT_ID).json
+	install -D -m 644 debian/$(EXT_ID).json \
+		debian/url-router-client/opt/edge/extensions/$(EXT_ID).json
+	install -D -m 644 debian/url-router-client.desktop \
+		debian/url-router-client/usr/share/applications/url-router-client.desktop
+	install -D -m 644 config.example.json \
+		debian/url-router/usr/share/doc/url-router/config.example.json
 
 override_dh_auto_clean:
 	dune clean
+	rm -rf _build/ext-staging _build/extension.crx
 
 override_dh_dwz:
 override_dh_strip:
