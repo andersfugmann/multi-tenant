@@ -2,7 +2,7 @@
   "socket": "/run/url-router/url-router.sock",
   "tenants": {
     "mydesktop": {
-      "browser_cmd": "xdg-open",
+      "browser_cmd": "chromium",
       "badge_label": "P",
       "badge_color": "#4285f4"
     }

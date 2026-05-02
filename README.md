@@ -144,7 +144,7 @@ The configuration file lives at `/etc/url-router/config.json`:
   "socket": "/run/url-router/url-router.sock",
   "tenants": {
     "mydesktop": {
-      "browser_cmd": "xdg-open",
+      "browser_cmd": "chromium",
       "badge_label": "P",
       "badge_color": "#4285f4"
     },
@@ -180,7 +180,7 @@ Each key in `tenants` **must match the hostname** of the machine or container it
 
 | Field | Description |
 |---|---|
-| `browser_cmd` | Command to launch the browser. For containers, include `machinectl shell`. Does **not** receive the URL as an argument — URLs are delivered via the extension. |
+| `browser_cmd` | Command to launch the browser (e.g., `chromium`, `firefox`). For containers, include `machinectl shell`. Must be the actual browser binary — **not** `xdg-open`, which would loop if url-router is the default handler. Does **not** receive the URL as an argument — URLs are delivered via the extension. |
 | `badge_label` | Short label shown on the extension badge (e.g., `"P"`, `"W"`) |
 | `badge_color` | Badge background color (hex) |
 
