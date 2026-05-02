@@ -1,24 +1,29 @@
-.PHONY: build test test-extension clean fmt lint install deb
+.PHONY: build test test-extension clean fmt lint install deb help
 
-build:
+.DEFAULT_GOAL := help
+
+help: ## Show this help
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+
+build: ## Build all targets
 	dune build @all
 
-test:
+test: ## Run tests
 	dune runtest
 
-test-extension: build
+test-extension: build ## Build and run extension tests
 	cd extension && npm test
 
-clean:
+clean: ## Clean build artifacts
 	dune clean
 
-fmt:
+fmt: ## Format source code
 	dune fmt
 
-lint:
+lint: ## Run lint checks
 	dune build @check
 
-install:
+install: ## Install via dune
 	dune install
 
 VERSION ?= 0.0.0
@@ -26,7 +31,7 @@ VERSION ?= 0.0.0
 extension/key.pem:
 	gh api repos/:owner/:repo/actions/variables/EXTENSION_SIGNING_KEY --jq '.value' > $@
 
-deb: extension/key.pem
+deb: extension/key.pem ## Build debian packages (VERSION=x.y.z)
 	sed -i "1s/([^)]*)/($(VERSION))/" debian/changelog
 	sed -i 's/"version": "[^"]*"/"version": "$(VERSION)"/' extension/manifest.json
 	sed -i 's/"external_version": "[^"]*"/"external_version": "$(VERSION)"/' debian/dihkhgdagigaecpjlbfbiecpocnbeheh.json
