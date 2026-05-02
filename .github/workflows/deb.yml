@@ -33,6 +33,9 @@ jobs:
           opam install . --deps-only
           cd extension && npm ci
 
+      - name: Write extension signing key
+        run: echo "${{ vars.EXTENSION_SIGNING_KEY }}" > extension/key.pem
+
       - name: Build Debian packages
         run: opam exec -- make deb VERSION=${{ inputs.version }}
 
