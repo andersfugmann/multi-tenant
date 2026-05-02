@@ -6,7 +6,8 @@ open Stdio
 let socket_path () =
   match Sys.getenv "URL_ROUTER_SOCKET" with
   | Some path -> path
-  | None -> "/run/url-router.sock"
+  | None ->
+    "/run/user/" ^ Int.to_string (Unix.getuid ()) ^ "/url-router.sock"
 
 (* -- Hostname detection *)
 

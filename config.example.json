@@ -1,5 +1,5 @@
 {
-  "socket": "/run/url-router.sock",
+  "socket": "/run/user/1000/url-router.sock",
   "tenants": {
     "host-machine": {
       "browser_cmd": "chromium",

@@ -63,7 +63,7 @@ Two `.deb` packages are provided via the
 
 ```bash
 sudo dpkg -i url-router_<version>_amd64.deb
-sudo systemctl enable --now url-router
+systemctl --user enable --now url-router
 ```
 
 ### Each Tenant / Container
@@ -78,12 +78,13 @@ a signed `.crx` that
 on next browser launch, and a `.desktop` entry for use as the default URL
 handler.
 
-The daemon's socket must be accessible from each tenant. For containers:
+The daemon's socket must be accessible from each tenant. For containers,
+bind-mount the user's runtime directory entry:
 
 ```ini
 # /etc/systemd/nspawn/<container>.nspawn
 [Files]
-Bind=/run/url-router.sock
+Bind=/run/user/1000/url-router.sock
 ```
 
 ## Configuration
@@ -94,7 +95,7 @@ its first argument) and reloads on changes. See
 
 ```json
 {
-  "socket": "/run/url-router.sock",
+  "socket": "/run/user/1000/url-router.sock",
   "tenants": {
     "host-machine": { "browser_cmd": "chromium", "label": "Host", "color": "#4285F4" },
     "work-container": { "browser_cmd": "machinectl shell work -- chromium", "label": "Work", "color": "#EA4335" }
@@ -138,7 +139,7 @@ url-router-client update-rule <index> '<json>' # Update rule
 url-router-client delete-rule <index>          # Delete rule
 ```
 
-Socket path defaults to `/run/url-router.sock` (override with
+Socket path defaults to `/run/user/<uid>/url-router.sock` (override with
 `URL_ROUTER_SOCKET`).
 
 To set as the default URL handler:

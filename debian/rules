@@ -19,6 +19,8 @@ override_dh_auto_test:
 override_dh_auto_install:
 	install -D -m 755 _build/default/bin/server/main.exe \
 		debian/url-router/usr/bin/url-router
+	install -D -m 644 debian/url-router.service \
+		debian/url-router/usr/lib/systemd/user/url-router.service
 	install -D -m 755 _build/default/bin/client/main.exe \
 		debian/url-router-client/usr/bin/url-router-client
 	install -D -m 644 debian/url_router.json \

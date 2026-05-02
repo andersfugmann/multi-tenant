@@ -14,7 +14,7 @@ There are three components:
 
 ## Daemon
 
-The daemon listens on a single Unix socket shared between all tenants (bind-mounted into containers). It accepts two kinds of connections:
+The daemon listens on a single Unix socket (default `/run/user/<uid>/url-router.sock`) shared between all tenants (bind-mounted into containers). It accepts two kinds of connections:
 
 ### Registered connections
 
@@ -181,7 +181,7 @@ All changes are saved by sending a `set-config` command to the daemon with the f
 
 The daemon reads its configuration from a JSON file. The configuration contains:
 
-- **socket** — path to the Unix socket
+- **socket** — path to the Unix socket (defaults to `/run/user/<uid>/url-router.sock`)
 - **tenants** — a map from hostname to tenant settings (browser command, badge label, badge color)
 - **rules** — an ordered list of routing rules (regex pattern, target tenant, enabled flag)
 - **defaults** — unmatched behavior, notification settings, cooldown duration, browser launch timeout

@@ -6,7 +6,6 @@ After=network.target
 Type=simple
 ExecStart=/usr/bin/url-router
 Restart=on-failure
-RuntimeDirectory=url-router
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target

@@ -1,6 +1,9 @@
 open Base
 open Stdio
 
+let default_socket_path () : string =
+  "/run/user/" ^ Int.to_string (Unix.getuid ()) ^ "/url-router.sock"
+
 (* -- State *)
 
 type cooldown_entry = { key : string; expires : float }
@@ -399,7 +402,11 @@ let () =
       start_time = Unix.gettimeofday ();
     }
   in
-  let socket_path = config.socket in
+  let socket_path =
+    match String.is_empty config.socket with
+    | true -> default_socket_path ()
+    | false -> config.socket
+  in
   (try Unix.unlink socket_path with Unix.Unix_error _ -> ());
   let inbox = Eio.Stream.create 64 in
   Eio.Switch.run @@ fun sw ->
