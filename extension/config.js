@@ -88,8 +88,8 @@ function renderTenants() {
       + (brandText ? ' <span class="tenant-brand">(' + escapeHtml(brandText) + ')</span>' : '')
       + '</div>'
       + '</div>'
-      + '<div class="tenant-cmd" title="' + escapeHtml(t.browser_cmd || "") + '">'
-      + escapeHtml(t.browser_cmd || "")
+      + '<div class="tenant-cmd" title="' + escapeHtml(t.browser_cmd || "(not set)") + '">'
+      + escapeHtml(t.browser_cmd || "(not set)")
       + '</div>'
       + '<div class="row-actions">'
       + '  <button class="btn-icon" title="Edit" data-edit-tenant="' + escapeHtml(id) + '">✏️</button>'
@@ -146,11 +146,10 @@ function saveTenant() {
   var cmd = document.getElementById("tfCmd").value.trim();
 
   if (!id) { showMsg("Tenant ID is required.", "error"); return; }
-  if (!cmd) { showMsg("Browser command is required.", "error"); return; }
 
   // Preserve brand from existing tenant (daemon-managed field)
   var existing = config.tenants[id];
-  var entry = { browser_cmd: cmd, label: label || id, color: color };
+  var entry = { browser_cmd: cmd || null, label: label || id, color: color };
   if (existing && existing.brand) {
     entry.brand = existing.brand;
   }

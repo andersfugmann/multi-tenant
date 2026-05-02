@@ -2,7 +2,6 @@
   "socket": "/run/user/1000/url-router.sock",
   "tenants": {
     "host-machine": {
-      "browser_cmd": "chromium",
       "label": "Host",
       "color": "#4285F4",
       "brand": "Google Chrome"

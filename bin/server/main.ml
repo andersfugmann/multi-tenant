@@ -4,6 +4,18 @@ open Stdio
 let default_socket_path () : string =
   "/run/user/" ^ Int.to_string (Unix.getuid ()) ^ "/url-router.sock"
 
+let browser_cmd_of_brand (brand : string) : string option =
+  let b = String.lowercase brand in
+  match String.is_substring b ~substring:"edge" with
+  | true -> Some "microsoft-edge"
+  | false ->
+    match String.is_substring b ~substring:"chromium" with
+    | true -> Some "chromium"
+    | false ->
+      match String.is_substring b ~substring:"chrome" with
+      | true -> Some "chrome"
+      | false -> None
+
 (* -- State *)
 
 type cooldown_entry = { key : string; expires : float }
@@ -34,7 +46,7 @@ type coordinator_msg =
 
 let default_config () : Protocol.config =
   {
-    socket = "";
+    socket = default_socket_path ();
     tenants = [];
     rules = [];
     defaults =
@@ -350,14 +362,20 @@ let rec coordinator_loop (state : state) (inbox : coordinator_msg Eio.Stream.t) 
            | false -> Some brand
          in
          (* Update or auto-add tenant config with brand *)
+         let suggested_cmd = browser_cmd_of_brand brand in
          let tenants =
            match List.Assoc.find state.config.tenants ~equal:String.equal tenant with
            | Some existing ->
-             let updated = { existing with brand = brand_opt } in
+             let browser_cmd =
+               match existing.browser_cmd with
+               | Some _ -> existing.browser_cmd
+               | None -> suggested_cmd
+             in
+             let updated = { existing with brand = brand_opt; browser_cmd } in
              List.Assoc.add state.config.tenants ~equal:String.equal tenant updated
            | None ->
              let new_tenant : Protocol.tenant_config =
-               { browser_cmd = ""; label = tenant; color = "#808080"; brand = brand_opt }
+               { browser_cmd = suggested_cmd; label = tenant; color = "#808080"; brand = brand_opt }
              in
              printf "[url-router] auto-added tenant %s to config\n%!" tenant;
              state.config.tenants @ [ (tenant, new_tenant) ]
@@ -460,11 +478,7 @@ let () =
       start_time = Unix.gettimeofday ();
     }
   in
-  let socket_path =
-    match String.is_empty config.socket with
-    | true -> default_socket_path ()
-    | false -> config.socket
-  in
+  let socket_path = config.socket in
   (try Unix.unlink socket_path with Unix.Unix_error _ -> ());
   let inbox = Eio.Stream.create 64 in
   Eio.Switch.run @@ fun sw ->

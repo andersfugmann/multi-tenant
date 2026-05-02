@@ -104,7 +104,11 @@ document.getElementById("btnStatus").addEventListener("click", function() {
 
   chrome.runtime.sendMessage({ action: "query_status" }, function(response) {
     if (!chrome.runtime.lastError && response && response.data) {
-      statusData = response.data;
+      // Wire response is ["Ok_status", { registered_tenants, uptime_seconds }]
+      var payload = response.data;
+      if (Array.isArray(payload) && payload.length === 2) {
+        statusData = payload[1];
+      }
     }
     pending--;
     render();
@@ -112,7 +116,11 @@ document.getElementById("btnStatus").addEventListener("click", function() {
 
   chrome.runtime.sendMessage({ action: "query_config" }, function(response) {
     if (!chrome.runtime.lastError && response && response.data) {
-      configData = response.data;
+      // Wire response is ["Ok_config", { tenants, rules, ... }]
+      var payload = response.data;
+      if (Array.isArray(payload) && payload.length === 2) {
+        configData = payload[1];
+      }
     }
     pending--;
     render();

@@ -13,7 +13,7 @@ type rule = {
 [@@deriving yojson]
 
 type tenant_config = {
-  browser_cmd : string;
+  browser_cmd : string option;
   label : string;
   color : string;
   brand : string option; [@default None]

@@ -14,7 +14,7 @@ type rule = {
 [@@deriving yojson]
 
 type tenant_config = {
-  browser_cmd : string;
+  browser_cmd : string option; [@default None]
   label : string;
   color : string;
   brand : string option; [@default None]
@@ -408,7 +408,7 @@ let%expect_test "sample data" =
     { pattern = ".*\\.example\\.com"; target = "work"; enabled = true }
   in
   let _tenant_cfg =
-    { browser_cmd = "chromium"; label = "Work"; color = "#0000ff"; brand = None }
+    { browser_cmd = Some "chromium"; label = "Work"; color = "#0000ff"; brand = None }
   in
   let _defaults =
     { unmatched = "personal"; cooldown_seconds = 5; browser_launch_timeout = 10 }
@@ -487,7 +487,7 @@ let sample_config =
     tenants =
       [
         ( "work",
-          { browser_cmd = "chromium --profile-directory=Work";
+          { browser_cmd = Some "chromium --profile-directory=Work";
             label = "Work";
             color = "#0000ff";
             brand = Some "Google Chrome" } );
