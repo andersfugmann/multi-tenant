@@ -53,11 +53,6 @@ module Web_navigation : sig
   val on_before_navigate : (string -> int -> int -> unit) -> unit
 end
 
-module Alarms : sig
-  val create : string -> period_minutes:float -> unit
-  val on_alarm : (string -> unit) -> unit
-end
-
 module Navigator : sig
   val get_browser_brand : unit -> string
 end

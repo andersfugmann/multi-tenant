@@ -44,12 +44,6 @@ function createMock() {
         set: jest.fn((_items, cb) => { if (cb) cb(); }),
       },
     },
-    alarms: {
-      create: jest.fn(),
-      onAlarm: {
-        addListener: jest.fn(),
-      },
-    },
     webNavigation: {
       onBeforeNavigate: {
         addListener: jest.fn((cb) => listeners.onBeforeNavigate.push(cb)),

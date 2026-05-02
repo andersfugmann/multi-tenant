@@ -388,10 +388,7 @@ let handle_event (state : state) (event : event) : state =
 
 (* -- Coordinator loop *)
 
-let coordinator_state = ref initial_state
-
 let rec coordinator (state : state) : unit Lwt.t =
-  coordinator_state := state;
   let%lwt event = Lwt_stream.next event_stream in
   let state = handle_event state event in
   coordinator state
@@ -415,12 +412,6 @@ let register_chrome_listeners () : unit =
             { json;
               respond = (fun resp -> respond (json_to_string resp))
             }));
-  Chrome_api.Alarms.on_alarm (fun _name ->
-      match is_connected !coordinator_state with
-      | true -> ()
-      | false ->
-        log "Keepalive: not connected, reconnecting…";
-        push Connect_requested);
   on_installed (fun () ->
     log "Extension installed";
     push Setup_menus);
@@ -433,6 +424,5 @@ let register_chrome_listeners () : unit =
 let () =
   log "URL Router extension starting";
   register_chrome_listeners ();
-  Chrome_api.Alarms.create "keepalive" ~period_minutes:0.4;
   push Connect_requested;
   Lwt.async (fun () -> coordinator initial_state)

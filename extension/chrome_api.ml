@@ -281,23 +281,6 @@ module Web_navigation = struct
               f (Js.to_string details##.url) details##.tabId details##.frameId)))
 end
 
-(* ── Alarms (keepalive) ───────────────────────────────────────────── *)
-
-module Alarms = struct
-  let alarms () : _ Js.t = get chrome "alarms"
-
-  let create (name : string) ~(period_minutes : float) : unit =
-    call (alarms ()) "create"
-      [| inject (Js.string name);
-         inject (js_obj [ ("periodInMinutes", inject period_minutes) ]) |]
-
-  let on_alarm (f : string -> unit) : unit =
-    add_listener (alarms ()) "onAlarm"
-      (inject
-         (Js.wrap_callback (fun alarm ->
-              f (Js.to_string (get alarm "name")))))
-end
-
 (* ── Navigator (browser brand detection) ─────────────────────────── *)
 
 module Navigator = struct
