@@ -79,11 +79,14 @@ function renderTenants() {
   var html = "";
   keys.forEach(function(id) {
     var t = tenants[id];
+    var brandText = t.brand ? t.brand : "";
     html += '<div class="row-item tenant-row">'
       + '<div class="color-swatch" style="background:' + escapeHtml(t.color || "#ccc") + '"></div>'
       + '<div class="tenant-info">'
       + '  <div class="tenant-id">' + escapeHtml(id) + '</div>'
-      + '  <div class="tenant-label">' + escapeHtml(t.label || "") + '</div>'
+      + '  <div class="tenant-label">' + escapeHtml(t.label || "")
+      + (brandText ? ' <span class="tenant-brand">(' + escapeHtml(brandText) + ')</span>' : '')
+      + '</div>'
       + '</div>'
       + '<div class="tenant-cmd" title="' + escapeHtml(t.browser_cmd || "") + '">'
       + escapeHtml(t.browser_cmd || "")
@@ -145,7 +148,13 @@ function saveTenant() {
   if (!id) { showMsg("Tenant ID is required.", "error"); return; }
   if (!cmd) { showMsg("Browser command is required.", "error"); return; }
 
-  config.tenants[id] = { browser_cmd: cmd, label: label || id, color: color };
+  // Preserve brand from existing tenant (daemon-managed field)
+  var existing = config.tenants[id];
+  var entry = { browser_cmd: cmd, label: label || id, color: color };
+  if (existing && existing.brand) {
+    entry.brand = existing.brand;
+  }
+  config.tenants[id] = entry;
   resetTenantForm();
   renderTenants();
   populateTenantSelects();
