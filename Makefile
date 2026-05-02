@@ -28,6 +28,7 @@ extension/key.pem:
 
 deb: extension/key.pem
 	sed -i "1s/([^)]*)/($(VERSION))/" debian/changelog
+	sed -i 's/"version": "[^"]*"/"version": "$(VERSION)"/' extension/manifest.json
 	dpkg-buildpackage -us -uc -b -d
 	@mkdir -p _build/deb
 	mv ../url-router_$(VERSION)_*.deb _build/deb/
