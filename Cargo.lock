@@ -1344,12 +1344,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "url-router-native-host"
+name = "url-router-client"
 version = "0.1.0"
 dependencies = [
+ "clap",
  "serde",
  "serde_json",
  "thiserror",
+ "tracing",
+ "tracing-subscriber",
  "url-router-protocol",
 ]
 
