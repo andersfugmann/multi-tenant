@@ -72,7 +72,7 @@ type test_result =
 (* -- GADT command type *)
 
 type _ command =
-  | Register : string -> unit command
+  | Register : string option -> unit command
   | Open : url -> route_result command
   | Open_on : tenant_id * url -> route_result command
   | Test : url -> test_result command
@@ -112,7 +112,10 @@ let parse_json_string (s : string) : (Yojson.Safe.t, string) Result.t =
 let serialize_server_command : type a. a server_command -> string =
  fun { tenant; command } ->
   match command with
-  | Register brand -> Printf.sprintf "REGISTER %s %s" tenant brand
+  | Register brand ->
+    (match brand with
+     | Some b -> Printf.sprintf "REGISTER %s %s" tenant b
+     | None -> Printf.sprintf "REGISTER %s" tenant)
   | Open url -> Printf.sprintf "OPEN %s %s" tenant url
   | Open_on (target, url) ->
     Printf.sprintf "OPEN-ON %s %s %s" tenant target url
@@ -136,7 +139,11 @@ let deserialize_server_command : string -> (packed_server_command, string) Resul
   fun line ->
   match String.split line ~on:' ' with
   | "REGISTER" :: tenant :: brand_parts ->
-    let brand = rejoin brand_parts in
+    let brand =
+      match brand_parts with
+      | [] -> None
+      | _ -> Some (rejoin brand_parts)
+    in
     Ok (Server_command { tenant; command = Register brand })
   | [ "STATUS"; tenant ] ->
     Ok (Server_command { tenant; command = Status })
@@ -255,7 +262,7 @@ let deserialize_push (line : string) : (packed_server_push, string) Result.t =
 
 module Wire = struct
   type command =
-    | Register of { brand : string; socket : string option [@default None]; name : string option [@default None] }
+    | Register of { brand : string option [@default None]; socket : string option [@default None]; name : string option [@default None] }
     | Open of { url : string }
     | Open_on of { target : string; url : string }
     | Test of { url : string }
@@ -418,7 +425,7 @@ let%expect_test "sample data" =
 (* -- Line protocol: server commands *)
 
 let%expect_test "line: serialize register" =
-  print_endline (serialize_server_command { tenant = "host"; command = Register "Google Chrome" });
+  print_endline (serialize_server_command { tenant = "host"; command = Register (Some "Google Chrome") });
   [%expect {| REGISTER host Google Chrome |}]
 
 let%expect_test "line: serialize open" =
@@ -452,9 +459,9 @@ let%expect_test "line: serialize status" =
   [%expect {| STATUS host |}]
 
 let%expect_test "line: round-trip register" =
-  let line = serialize_server_command { tenant = "host"; command = Register "Microsoft Edge" } in
+  let line = serialize_server_command { tenant = "host"; command = Register (Some "Microsoft Edge") } in
   (match deserialize_server_command line with
-   | Ok (Server_command { tenant; command = Register brand }) ->
+   | Ok (Server_command { tenant; command = Register (Some brand) }) ->
      printf "tenant=%s brand=%s\n" tenant brand
    | _ -> print_endline "FAIL");
   [%expect {| tenant=host brand=Microsoft Edge |}]
@@ -547,7 +554,7 @@ let%expect_test "line: round-trip delete_rule" =
 (* -- Line protocol: responses *)
 
 let%expect_test "line: response OK" =
-  print_endline (serialize_response (Register "") (Ok ()));
+  print_endline (serialize_response (Register None) (Ok ()));
   [%expect {| OK |}]
 
 let%expect_test "line: response LOCAL" =
@@ -571,7 +578,7 @@ let%expect_test "line: response NOMATCH" =
   [%expect {| NOMATCH personal |}]
 
 let%expect_test "line: response ERR" =
-  print_endline (serialize_response (Register "") (Error "something went wrong"));
+  print_endline (serialize_response (Register None) (Error "something went wrong"));
   [%expect {| ERR something went wrong |}]
 
 let%expect_test "line: round-trip response config" =
@@ -597,7 +604,7 @@ let%expect_test "line: round-trip response status" =
   [%expect {| uptime=3600 tenants=2 |}]
 
 let%expect_test "line: round-trip response err with special chars" =
-  let cmd = Register "" in
+  let cmd = Register None in
   let line = serialize_response cmd (Error "fail: \"bad\" & <oops>") in
   (match deserialize_response cmd line with
    | Error msg -> printf "err=%s\n" msg
@@ -620,10 +627,10 @@ let%expect_test "line: round-trip push navigate with spaces" =
 (* -- JSON: commands *)
 
 let%expect_test "json: round-trip register" =
-  let json = serialize_command_json (Register "Google Chrome") in
+  let json = serialize_command_json (Register (Some "Google Chrome")) in
   print_endline (Yojson.Safe.to_string json);
   (match deserialize_command_json json with
-   | Ok (Command (Register brand)) -> printf "brand=%s\n" brand
+   | Ok (Command (Register (Some brand))) -> printf "brand=%s\n" brand
    | _ -> print_endline "FAIL");
   [%expect {|
     ["Register",{"brand":"Google Chrome"}]
@@ -689,7 +696,7 @@ let%expect_test "json: round-trip delete_rule" =
 (* -- JSON: responses *)
 
 let%expect_test "json: response ok" =
-  let json = serialize_response_json (Register "") (Ok ()) in
+  let json = serialize_response_json (Register None) (Ok ()) in
   print_endline (Yojson.Safe.to_string json);
   [%expect {| ["Ok_unit"] |}]
 
@@ -722,7 +729,7 @@ let%expect_test "json: response nomatch" =
   [%expect {| ["Ok_test",["No_match",{"default_tenant":"personal"}]] |}]
 
 let%expect_test "json: response error" =
-  let json = serialize_response_json (Register "") (Error "bad request") in
+  let json = serialize_response_json (Register None) (Error "bad request") in
   print_endline (Yojson.Safe.to_string json);
   [%expect {| ["Err",{"message":"bad request"}] |}]
 
@@ -755,7 +762,7 @@ let%expect_test "json: bridge push round-trip" =
     url=https://example.com |}]
 
 let%expect_test "json: bridge response round-trip" =
-  let json = bridge_response_to_yojson (Register "") (Ok ()) in
+  let json = bridge_response_to_yojson (Register None) (Ok ()) in
   (match bridge_message_of_yojson json with
    | Ok (Wire.Response Wire.Ok_unit) -> print_endline "ok_unit"
    | _ -> print_endline "FAIL");

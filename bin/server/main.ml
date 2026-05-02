@@ -4,17 +4,18 @@ open Stdio
 let default_socket_path () : string =
   "/run/user/" ^ Int.to_string (Unix.getuid ()) ^ "/url-router.sock"
 
-let browser_cmd_of_brand (brand : string) : string option =
-  let b = String.lowercase brand in
-  match String.is_substring b ~substring:"edge" with
-  | true -> Some "microsoft-edge"
-  | false ->
-    match String.is_substring b ~substring:"chromium" with
-    | true -> Some "chromium"
+let browser_cmd_of_brand (brand : string option) : string option =
+  Option.bind brand ~f:(fun raw ->
+    let b = String.lowercase raw in
+    match String.is_substring b ~substring:"edge" with
+    | true -> Some "microsoft-edge"
     | false ->
-      match String.is_substring b ~substring:"chrome" with
-      | true -> Some "chrome"
-      | false -> None
+      match String.is_substring b ~substring:"chromium" with
+      | true -> Some "chromium"
+      | false ->
+        match String.is_substring b ~substring:"chrome" with
+        | true -> Some "chrome"
+        | false -> None)
 
 (* -- State *)
 
@@ -37,7 +38,7 @@ type coordinator_msg =
     }
   | Register_tenant of {
       tenant : string;
-      brand : string;
+      brand : string option;
       push_stream : string Eio.Stream.t;
       reply : (unit, string) Result.t Eio.Promise.u;
     }
@@ -293,7 +294,7 @@ let dispatch_command :
   let (state, response_line) =
     match cmd with
     | Protocol.Register _ ->
-      (state, Protocol.serialize_response (Protocol.Register "")
+      (state, Protocol.serialize_response (Protocol.Register None)
          (Error "unexpected REGISTER in command mode"))
     | Protocol.Open url ->
       let (state, resp) = handle_open state tenant url in
@@ -354,13 +355,9 @@ let rec coordinator_loop (state : state) (inbox : coordinator_msg Eio.Stream.t) 
        | false ->
          let registry = Map.set state.registry ~key:tenant ~data:push_stream in
          Eio.Promise.resolve reply (Ok ());
-         printf "[url-router] tenant %s registered (brand=%s)\n%!" tenant brand;
+         printf "[url-router] tenant %s registered (brand=%s)\n%!" tenant
+           (Option.value brand ~default:"(none)");
          let state = { state with registry } in
-         let brand_opt =
-           match String.is_empty brand with
-           | true -> None
-           | false -> Some brand
-         in
          (* Update or auto-add tenant config with brand *)
          let suggested_cmd = browser_cmd_of_brand brand in
          let tenants =
@@ -371,11 +368,11 @@ let rec coordinator_loop (state : state) (inbox : coordinator_msg Eio.Stream.t) 
                | Some _ -> existing.browser_cmd
                | None -> suggested_cmd
              in
-             let updated = { existing with brand = brand_opt; browser_cmd } in
+             let updated = { existing with brand; browser_cmd } in
              List.Assoc.add state.config.tenants ~equal:String.equal tenant updated
            | None ->
              let new_tenant : Protocol.tenant_config =
-               { browser_cmd = suggested_cmd; label = tenant; color = "#808080"; brand = brand_opt }
+               { browser_cmd = suggested_cmd; label = tenant; color = "#808080"; brand }
              in
              printf "[url-router] auto-added tenant %s to config\n%!" tenant;
              state.config.tenants @ [ (tenant, new_tenant) ]
@@ -440,7 +437,8 @@ let handle_connection (inbox : coordinator_msg Eio.Stream.t) flow =
        printf "[url-router] res: %s\n%!" resp;
        Eio.Flow.copy_string (resp ^ "\n") flow
      | Ok (Server_command { tenant; command = Register brand }) ->
-       printf "[url-router] res[%s]: registering (brand=%s)\n%!" tenant brand;
+       printf "[url-router] res[%s]: registering (brand=%s)\n%!" tenant
+         (Option.value brand ~default:"(none)");
        handle_register inbox ~tenant ~brand flow reader
      | Ok (Server_command _) ->
        let (promise, reply) = Eio.Promise.create () in

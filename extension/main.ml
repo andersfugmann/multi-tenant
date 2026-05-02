@@ -208,19 +208,23 @@ let send_command (state : state) (cmd : Protocol.packed_command)
 
 (* -- Connection management *)
 
+let non_empty (s : string) : string option =
+  match String.is_empty s with
+  | true -> None
+  | false -> Some s
+
 let connect_with_settings (port : native_port) (tenant_name : string) (socket_path : string) : state =
-  let brand = Js.to_string (get_browser_brand_js ()) in
-  log (Printf.sprintf "Browser brand: %s, tenant: %s, socket: %s" brand
-    (match String.is_empty tenant_name with true -> "(default)" | false -> tenant_name)
-    (match String.is_empty socket_path with true -> "(default)" | false -> socket_path));
+  let brand = non_empty (Js.to_string (get_browser_brand_js ())) in
+  let name = non_empty tenant_name in
+  let socket = non_empty socket_path in
+  log (Printf.sprintf "Browser brand: %s, tenant: %s, socket: %s"
+    (Option.value brand ~default:"(none)")
+    (Option.value name ~default:"(default)")
+    (Option.value socket ~default:"(default)"));
   let state = { native_port = Some port; pending_callbacks = []; tenant_names = [] } in
   (* Build Wire.Register directly to include socket/name overrides *)
   let register_wire : Protocol.Wire.command =
-    Register {
-      brand;
-      socket = (match String.is_empty socket_path with true -> None | false -> Some socket_path);
-      name = (match String.is_empty tenant_name with true -> None | false -> Some tenant_name);
-    }
+    Register { brand; socket; name }
   in
   let json = Protocol.Wire.command_to_yojson register_wire in
   let state = send_to_bridge state json (fun _wire_resp -> ()) in

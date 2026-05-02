@@ -163,13 +163,13 @@ let run_register ~net ~sock_path ~tenant =
     Eio.Net.connect ~sw net (`Unix sock_path)
   in
   let server_cmd : unit Protocol.server_command =
-    { tenant; command = Register "" }
+    { tenant; command = Register None }
   in
   let line = Protocol.serialize_server_command server_cmd in
   Eio.Flow.copy_string (line ^ "\n") flow;
   let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
   let first_line = Eio.Buf_read.line reader in
-  (match Protocol.deserialize_response (Register "") first_line with
+  (match Protocol.deserialize_response (Register None) first_line with
    | Ok () -> printf "Registered as %s\n%!" tenant
    | Error msg ->
      eprintf "Registration failed: %s\n%!" msg;
@@ -316,24 +316,16 @@ let run_bridge env =
        | Ok (Register { brand; socket; name }) ->
          let resp = Protocol.bridge_response_to_yojson (Register brand) (Ok ()) in
          write_out resp;
-         let tenant =
-           match name with
-           | Some n when not (String.is_empty n) -> n
-           | _ -> default_tenant
-         in
+         let tenant = Option.value name ~default:default_tenant in
          (brand, tenant, socket)
        | _ ->
          let resp = Protocol.Wire.(bridge_message_to_yojson
            (Response (Err { message = "expected Register as first message" }))) in
          write_out resp;
-         ("", default_tenant, None))
-    | None -> ("", default_tenant, None)
+         (None, default_tenant, None))
+    | None -> (None, default_tenant, None)
   in
-  let sock_path =
-    match sock_override with
-    | Some s when not (String.is_empty s) -> s
-    | _ -> socket_path ()
-  in
+  let sock_path = Option.value sock_override ~default:(socket_path ()) in
   Eio.Fiber.both
     (fun () ->
       bridge_command_fiber ~net ~tenant ~sock_path
