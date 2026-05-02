@@ -39,7 +39,7 @@ let json_parse (s : string) : _ Js.t =
 let json_stringify (v : _ Js.t) : string =
   Js.to_string (Js._JSON##stringify v)
 
-let safe_stringify (v : 'a) : string =
+let safe_stringify (v : _ Js.t) : string =
   match Js.to_string (Js._JSON##stringify v) with
   | s -> s
   | exception _ -> "null"
@@ -72,7 +72,7 @@ module Port = struct
 
   let on_disconnect (p : port) (f : unit -> unit) : unit =
     add_listener p "onDisconnect"
-      (inject (Js.wrap_callback (fun () -> f ())))
+      (inject (Js.wrap_callback (fun _port -> f ())))
 end
 
 (* ── Runtime ─────────────────────────────────────────────────────── *)
@@ -88,12 +88,15 @@ module Runtime = struct
     Js.to_string
       (call rt "getURL" [| inject (Js.string path) |] : Js.js_string Js.t)
 
+  class type runtime_error = object
+    method message : Js.js_string Js.t Js.readonly_prop
+  end
+
   let last_error () : string option =
     match get_opt rt "lastError" with
     | None -> None
     | Some err ->
-      let msg : Js.js_string Js.t = Js.Unsafe.coerce (get err "message") in
-      Some (Js.to_string msg)
+      Some (Js.to_string (Js.Unsafe.coerce err : runtime_error Js.t)##.message)
 
   let send_message (msg_json : string)
       ~(on_response : string -> string -> unit) : unit =
@@ -115,7 +118,7 @@ module Runtime = struct
 
   let on_startup (f : unit -> unit) : unit =
     add_listener rt "onStartup"
-      (inject (Js.wrap_callback (fun () -> f ())))
+      (inject (Js.wrap_callback (fun _unit -> f ())))
 
   let on_message (f : string -> (string -> unit) -> unit) : unit =
     add_listener rt "onMessage"
@@ -226,24 +229,28 @@ module Context_menus = struct
   let remove_all (f : unit -> unit) : unit =
     call (menus ()) "removeAll" [| inject (Js.wrap_callback f) |]
 
+  class type click_info = object
+    method menuItemId : Js.js_string Js.t Js.readonly_prop
+    method linkUrl : Js.js_string Js.t Js.Optdef.t Js.readonly_prop
+    method pageUrl : Js.js_string Js.t Js.Optdef.t Js.readonly_prop
+  end
+
   let on_clicked (f : string -> string -> string -> unit) : unit =
     add_listener (menus ()) "onClicked"
       (inject
-         (Js.wrap_callback (fun info _tab ->
-              let menu_id : Js.js_string Js.t =
-                Js.Unsafe.coerce (get info "menuItemId")
-              in
+         (Js.wrap_callback (fun (info : click_info Js.t) _tab ->
+              let menu_id = Js.to_string info##.menuItemId in
               let link_url =
-                match get_opt info "linkUrl" with
-                | None -> ""
-                | Some v -> Js.to_string (Js.Unsafe.coerce v)
+                Js.Optdef.case info##.linkUrl
+                  (fun () -> "")
+                  Js.to_string
               in
               let page_url =
-                match get_opt info "pageUrl" with
-                | None -> ""
-                | Some v -> Js.to_string (Js.Unsafe.coerce v)
+                Js.Optdef.case info##.pageUrl
+                  (fun () -> "")
+                  Js.to_string
               in
-              f (Js.to_string menu_id) link_url page_url)))
+              f menu_id link_url page_url)))
 end
 
 (* ── Web Navigation ──────────────────────────────────────────────── *)
@@ -279,34 +286,43 @@ module Navigator = struct
         "Not)A;Brand";
       ]
 
+  class type brand_entry = object
+    method brand : Js.js_string Js.t Js.readonly_prop
+  end
+
+  class type user_agent_data = object
+    method brands : brand_entry Js.t Js.js_array Js.t Js.Optdef.t Js.readonly_prop
+  end
+
+  class type navigator = object
+    method userAgentData : user_agent_data Js.t Js.Optdef.t Js.readonly_prop
+  end
+
   let get_browser_brand () : string =
     match get_opt global "navigator" with
     | None -> ""
-    | Some nav ->
-      (match get_opt nav "userAgentData" with
-       | None -> ""
-       | Some uad ->
-         (match get_opt uad "brands" with
-          | None -> ""
-          | Some brands_js ->
-            let arr : _ Js.t Js.js_array Js.t = Js.Unsafe.coerce brands_js in
-            let len = arr##.length in
-            let brands =
-              List.init len ~f:(fun i ->
-                  match Js.Optdef.to_option (Js.array_get arr i) with
-                  | None -> ""
-                  | Some entry ->
-                    Js.to_string
-                      (Js.Unsafe.coerce (get entry "brand")
-                        : Js.js_string Js.t))
-            in
-            (match
-               List.find brands ~f:(fun b ->
-                   not (Set.mem dominated_brands b))
-             with
-             | Some b -> b
-             | None ->
-               (match brands with
-                | b :: _ -> b
-                | [] -> ""))))
+    | Some nav_js ->
+      let nav : navigator Js.t = Js.Unsafe.coerce nav_js in
+      Js.Optdef.case nav##.userAgentData
+        (fun () -> "")
+        (fun uad ->
+           Js.Optdef.case uad##.brands
+             (fun () -> "")
+             (fun arr ->
+                let len = arr##.length in
+                let brands =
+                  List.init len ~f:(fun i ->
+                      Js.Optdef.case (Js.array_get arr i)
+                        (fun () -> "")
+                        (fun entry -> Js.to_string entry##.brand))
+                in
+                (match
+                   List.find brands ~f:(fun b ->
+                       not (Set.mem dominated_brands b))
+                 with
+                 | Some b -> b
+                 | None ->
+                   (match brands with
+                    | b :: _ -> b
+                    | [] -> ""))))
 end
