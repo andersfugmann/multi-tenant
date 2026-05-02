@@ -1,10 +1,13 @@
-.PHONY: build test clean fmt lint install deb
+.PHONY: build test test-extension clean fmt lint install deb
 
 build:
 	dune build @all
 
 test:
 	dune runtest
+
+test-extension: build
+	cd extension && npm test
 
 clean:
 	dune clean
