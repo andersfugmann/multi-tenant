@@ -23,24 +23,32 @@ override_dh_auto_install:
 		debian/url-router/usr/lib/systemd/user/url-router.service
 	install -D -m 755 _build/default/bin/client/main.exe \
 		debian/url-router-client/usr/bin/url-router-client
-	# Native messaging manifests
+	# Canonical native messaging manifest
 	install -D -m 644 debian/url_router.json \
+		debian/url-router-client/usr/share/url-router/url_router.json
+	# Symlink for each browser
+	mkdir -p debian/url-router-client/etc/chromium/native-messaging-hosts
+	ln -sf /usr/share/url-router/url_router.json \
 		debian/url-router-client/etc/chromium/native-messaging-hosts/url_router.json
-	install -D -m 644 debian/url_router.json \
+	mkdir -p debian/url-router-client/etc/opt/chrome/native-messaging-hosts
+	ln -sf /usr/share/url-router/url_router.json \
 		debian/url-router-client/etc/opt/chrome/native-messaging-hosts/url_router.json
-	install -D -m 644 debian/url_router.json \
+	mkdir -p debian/url-router-client/etc/opt/edge/native-messaging-hosts
+	ln -sf /usr/share/url-router/url_router.json \
 		debian/url-router-client/etc/opt/edge/native-messaging-hosts/url_router.json
-	# External extension descriptors
+	# Canonical extension descriptor
 	install -D -m 644 debian/$(EXT_ID).json \
+		debian/url-router-client/usr/share/url-router/$(EXT_ID).json
+	# Symlink for each browser
+	mkdir -p debian/url-router-client/usr/share/chromium/extensions
+	ln -sf /usr/share/url-router/$(EXT_ID).json \
 		debian/url-router-client/usr/share/chromium/extensions/$(EXT_ID).json
-	install -D -m 644 debian/$(EXT_ID).json \
+	mkdir -p debian/url-router-client/usr/share/google-chrome/extensions
+	ln -sf /usr/share/url-router/$(EXT_ID).json \
 		debian/url-router-client/usr/share/google-chrome/extensions/$(EXT_ID).json
-	install -D -m 644 debian/$(EXT_ID).json \
-		debian/url-router-client/opt/microsoft/msedge/extensions/$(EXT_ID).json
-	# Edge beta/dev/canary via symlinks to msedge
-	for variant in msedge-beta msedge-dev msedge-canary; do \
+	for variant in msedge msedge-beta msedge-dev msedge-canary; do \
 		mkdir -p debian/url-router-client/opt/microsoft/$$variant/extensions; \
-		ln -sf /opt/microsoft/msedge/extensions/$(EXT_ID).json \
+		ln -sf /usr/share/url-router/$(EXT_ID).json \
 			debian/url-router-client/opt/microsoft/$$variant/extensions/$(EXT_ID).json; \
 	done
 	install -D -m 644 _build/extension.crx \
