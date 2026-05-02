@@ -5,7 +5,7 @@
  (js_of_ocaml
   (javascript_files chrome_api.js)
   (build_runtime_flags (:standard -w no-free-variables))
-  (flags (:standard --Werror)))
+  (flags (:standard --Werror -w no-free-variables)))
  (preprocess
   (pps js_of_ocaml-ppx lwt_ppx)))
 

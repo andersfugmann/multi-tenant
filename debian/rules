@@ -4,7 +4,7 @@
 	dh $@
 
 override_dh_auto_build:
-	dune build bin/server/main.exe bin/client/main.exe extension/main.bc.js
+	dune build --profile release bin/server/main.exe bin/client/main.exe extension/main.bc.js
 
 override_dh_auto_test:
 
