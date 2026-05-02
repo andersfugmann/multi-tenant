@@ -31,20 +31,45 @@ type coordinator_msg =
   | Unregister_tenant of { tenant : string }
   | Update_config of Protocol.config
 
+let default_config () : Protocol.config =
+  {
+    socket = "";
+    tenants = [];
+    rules = [];
+    defaults =
+      { unmatched = "local"; cooldown_seconds = 5; browser_launch_timeout = 10 };
+  }
+
 (* -- Config loading / saving *)
+
+let rec mkdir_p (path : string) : unit =
+  match Stdlib.Sys.file_exists path with
+  | true -> ()
+  | false ->
+    mkdir_p (Stdlib.Filename.dirname path);
+    (try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+
+let save_config_to_path (config_path : string) (config : Protocol.config) : unit =
+  mkdir_p (Stdlib.Filename.dirname config_path);
+  let json = Protocol.config_to_yojson config in
+  let content = Yojson.Safe.pretty_to_string json in
+  Out_channel.write_all config_path ~data:(content ^ "\n")
 
 let load_config (path : string) : (Protocol.config, string) Result.t =
   match Stdlib.Sys.file_exists path with
-  | false -> Error (Printf.sprintf "config file not found: %s" path)
   | true ->
     let content = In_channel.read_all path in
     Result.bind (Protocol.parse_json_string content) ~f:(fun json ->
         Protocol.config_of_yojson json)
-
-let save_config_to_path (config_path : string) (config : Protocol.config) : unit =
-  let json = Protocol.config_to_yojson config in
-  let content = Yojson.Safe.pretty_to_string json in
-  Out_channel.write_all config_path ~data:(content ^ "\n")
+  | false ->
+    let config = default_config () in
+    eprintf "[url-router] no config found, creating default at %s\n%!" path;
+    (try
+       save_config_to_path path config
+     with exn ->
+       eprintf "[url-router] warning: could not write default config: %s\n%!"
+         (Exn.to_string exn));
+    Ok config
 
 let config_mtime (path : string) : float option =
   match Unix.stat path with
