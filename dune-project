@@ -27,6 +27,14 @@
    (>= 1.0))
   (re
    (>= 1.0))
+  (js_of_ocaml
+   (>= 5.0))
+  (js_of_ocaml-lwt
+   (>= 5.0))
+  (js_of_ocaml-ppx
+   (>= 5.0))
+  (lwt
+   (>= 5.0))
   (ppx_expect
    (and
     :with-test
