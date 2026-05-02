@@ -23,18 +23,28 @@ override_dh_auto_install:
 		debian/url-router/usr/lib/systemd/user/url-router.service
 	install -D -m 755 _build/default/bin/client/main.exe \
 		debian/url-router-client/usr/bin/url-router-client
+	# Native messaging manifests
 	install -D -m 644 debian/url_router.json \
 		debian/url-router-client/etc/chromium/native-messaging-hosts/url_router.json
 	install -D -m 644 debian/url_router.json \
+		debian/url-router-client/etc/opt/chrome/native-messaging-hosts/url_router.json
+	install -D -m 644 debian/url_router.json \
 		debian/url-router-client/etc/opt/edge/native-messaging-hosts/url_router.json
-	install -D -m 644 _build/extension.crx \
-		debian/url-router-client/usr/share/url-router/extension.crx
+	# External extension descriptors
 	install -D -m 644 debian/$(EXT_ID).json \
 		debian/url-router-client/usr/share/chromium/extensions/$(EXT_ID).json
 	install -D -m 644 debian/$(EXT_ID).json \
 		debian/url-router-client/usr/share/google-chrome/extensions/$(EXT_ID).json
 	install -D -m 644 debian/$(EXT_ID).json \
-		debian/url-router-client/opt/edge/extensions/$(EXT_ID).json
+		debian/url-router-client/opt/microsoft/msedge/extensions/$(EXT_ID).json
+	# Edge beta/dev/canary via symlinks to msedge
+	for variant in msedge-beta msedge-dev msedge-canary; do \
+		mkdir -p debian/url-router-client/opt/microsoft/$$variant/extensions; \
+		ln -sf /opt/microsoft/msedge/extensions/$(EXT_ID).json \
+			debian/url-router-client/opt/microsoft/$$variant/extensions/$(EXT_ID).json; \
+	done
+	install -D -m 644 _build/extension.crx \
+		debian/url-router-client/usr/share/url-router/extension.crx
 	install -D -m 644 debian/url-router-client.desktop \
 		debian/url-router-client/usr/share/applications/url-router-client.desktop
 	install -D -m 644 config.example.json \
