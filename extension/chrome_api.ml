@@ -294,7 +294,6 @@ end
 module Navigator = struct
   let is_grease_brand (b : string) : bool =
     String.is_prefix b ~prefix:"Not"
-    || String.equal b "Chromium"
 
   class type brand_entry = object
     method brand : Js.js_string Js.t Js.readonly_prop
@@ -336,13 +335,17 @@ module Navigator = struct
                  (fun () -> "")
                  (fun entry -> Js.to_string entry##.brand))
          in
+         let non_grease =
+           List.filter brands ~f:(fun b ->
+               not (is_grease_brand b) && not (String.is_empty b))
+         in
          match
-           List.find brands ~f:(fun b ->
-               not (is_grease_brand b))
+           List.find non_grease ~f:(fun b ->
+               not (String.equal b "Chromium"))
          with
          | Some b -> b
          | None ->
-           (match brands with
+           (match non_grease with
             | b :: _ -> b
             | [] -> ""))
 
