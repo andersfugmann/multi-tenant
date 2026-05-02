@@ -51,21 +51,23 @@
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      font-size: 12px;
+      font-size: 13px;
       font-weight: 500;
-      padding: 4px 10px;
+      padding: 6px 12px;
       border-radius: 12px;
       background: var(--bg);
       border: 1px solid var(--border);
     }
     .status-badge .dot {
-      width: 8px;
-      height: 8px;
+      width: 10px;
+      height: 10px;
       border-radius: 50%;
       background: #aaa;
     }
     .status-badge .dot.ok { background: #34a853; }
     .status-badge .dot.err { background: #ea4335; }
+    .status-badge.connected { border-color: #34a853; }
+    .status-badge.disconnected { border-color: #ea4335; }
 
     .card {
       background: var(--bg);

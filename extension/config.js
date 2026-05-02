@@ -23,6 +23,7 @@ var editingRuleIndex = null;
 function setStatus(connected) {
   statusDot.className = "dot " + (connected ? "ok" : "err");
   statusText.textContent = connected ? "Connected" : "Disconnected";
+  statusDot.parentElement.className = "status-badge " + (connected ? "connected" : "disconnected");
 }
 
 function showMsg(text, type) {
@@ -71,7 +72,7 @@ function renderTenants() {
   var keys = Object.keys(tenants);
 
   if (keys.length === 0) {
-    tenantListEl.innerHTML = '<div class="card-empty">No tenants configured.</div>';
+    tenantListEl.innerHTML = '<div class="card-empty">No tenants defined. Add a tenant to configure browser profiles.</div>';
     return;
   }
 
@@ -285,10 +286,10 @@ function populateTenantSelects() {
   var unmatched = document.getElementById("dfUnmatched");
   var currentVal = unmatched.value || (config.defaults && config.defaults.unmatched) || "";
   unmatched.innerHTML = "";
-  // "local" is always an option (handle locally)
+  // "local" is always an option
   var localOpt = document.createElement("option");
   localOpt.value = "local";
-  localOpt.textContent = "Local (this browser)";
+  localOpt.textContent = "Local (no rerouting)";
   localOpt.selected = (currentVal === "local");
   unmatched.appendChild(localOpt);
 
