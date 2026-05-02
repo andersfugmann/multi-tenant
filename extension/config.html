@@ -69,6 +69,16 @@
     .status-badge.connected { border-color: #34a853; }
     .status-badge.disconnected { border-color: #ea4335; }
 
+    .dot.connected { background: #34a853; }
+    .dot.disconnected { background: #ea4335; }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #aaa;
+      flex-shrink: 0;
+    }
+
     .card {
       background: var(--bg);
       border: 1px solid var(--border);
@@ -151,7 +161,7 @@
 
     /* Tenants grid */
     .tenant-row {
-      grid-template-columns: 32px 1fr 1.5fr auto;
+      grid-template-columns: 42px 1fr 1.5fr auto;
     }
     .color-swatch {
       width: 24px;

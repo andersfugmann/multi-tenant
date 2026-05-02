@@ -13,6 +13,8 @@ var ruleFormEl = document.getElementById("ruleForm");
 
 // Current config state
 var config = null;
+// Connected tenant IDs from status
+var connectedTenants = {};
 // Tenant being edited (null = adding new)
 var editingTenantId = null;
 // Rule being edited (null = adding new, otherwise index)
@@ -40,29 +42,62 @@ function escapeHtml(s) {
   return div.innerHTML;
 }
 
-// -- Fetch config --
+function browserCmdFromBrand(brand) {
+  if (!brand) return "";
+  var b = brand.toLowerCase();
+  if (b.indexOf("edge") !== -1) return "microsoft-edge";
+  if (b.indexOf("chromium") !== -1) return "chromium";
+  if (b.indexOf("chrome") !== -1) return "chrome";
+  return "";
+}
+
+// -- Fetch config + status --
 
 function fetchConfig() {
+  var pending = 2;
+  var configOk = false;
+
   chrome.runtime.sendMessage({ action: "query_config" }, function(response) {
-    if (chrome.runtime.lastError || !response) {
-      setStatus(false);
-      loadingEl.textContent = "Failed to connect to extension.";
-      return;
+    if (!chrome.runtime.lastError && response) {
+      setStatus(response.connected);
+      var data = response.data;
+      if (Array.isArray(data) && data.length === 2 && data[0] === "Ok_config") {
+        config = data[1];
+        configOk = true;
+      }
     }
-    setStatus(response.connected);
-    var data = response.data;
-    // Wire format: ["Ok_config", {...config}]
-    if (Array.isArray(data) && data.length === 2 && data[0] === "Ok_config") {
-      config = data[1];
-      loadingEl.style.display = "none";
-      contentEl.style.display = "block";
-      renderTenants();
-      renderRules();
-      renderDefaults();
-    } else {
-      loadingEl.textContent = "Failed to load configuration.";
-    }
+    pending--;
+    if (pending === 0) finishInit(configOk);
   });
+
+  chrome.runtime.sendMessage({ action: "query_status" }, function(response) {
+    if (!chrome.runtime.lastError && response && response.data) {
+      var payload = response.data;
+      if (Array.isArray(payload) && payload.length === 2 && payload[1]) {
+        var info = payload[1];
+        if (info.registered_tenants) {
+          info.registered_tenants.forEach(function(t) {
+            connectedTenants[t] = true;
+          });
+        }
+      }
+    }
+    pending--;
+    if (pending === 0) finishInit(configOk);
+  });
+}
+
+function finishInit(configOk) {
+  if (!configOk) {
+    setStatus(false);
+    loadingEl.textContent = "Failed to load configuration.";
+    return;
+  }
+  loadingEl.style.display = "none";
+  contentEl.style.display = "block";
+  renderTenants();
+  renderRules();
+  renderDefaults();
 }
 
 // -- Tenant list rendering --
@@ -79,9 +114,14 @@ function renderTenants() {
   var html = "";
   keys.forEach(function(id) {
     var t = tenants[id];
-    var brandText = t.brand ? t.brand : "";
+    var isConnected = !!connectedTenants[id];
+    var brandText = t.brand || "";
+    var dotClass = isConnected ? "connected" : "disconnected";
     html += '<div class="row-item tenant-row">'
-      + '<div class="color-swatch" style="background:' + escapeHtml(t.color || "#ccc") + '"></div>'
+      + '<div style="display:flex;align-items:center;gap:6px">'
+      + '  <span class="dot ' + dotClass + '" title="' + (isConnected ? "Connected" : "Disconnected") + '"></span>'
+      + '  <div class="color-swatch" style="background:' + escapeHtml(t.color || "#ccc") + '"></div>'
+      + '</div>'
       + '<div class="tenant-info">'
       + '  <div class="tenant-id">' + escapeHtml(id) + '</div>'
       + '  <div class="tenant-label">' + escapeHtml(t.label || "")
@@ -118,14 +158,16 @@ function editTenant(id) {
   document.getElementById("tfId").disabled = true;
   document.getElementById("tfLabel").value = t.label || "";
   document.getElementById("tfColor").value = t.color || "#1a73e8";
-  document.getElementById("tfCmd").value = t.browser_cmd || "";
+  var cmdField = document.getElementById("tfCmd");
+  cmdField.value = t.browser_cmd || "";
+  // Suggest a command from brand if none is set
+  cmdField.placeholder = browserCmdFromBrand(t.brand) || "(optional)";
   document.getElementById("tfSave").textContent = "Update tenant";
   tenantFormEl.classList.add("visible");
 }
 
 function deleteTenant(id) {
   delete config.tenants[id];
-  // Also update rules and defaults that reference this tenant
   renderTenants();
   renderRules();
   populateTenantSelects();
@@ -137,7 +179,9 @@ function resetTenantForm() {
   document.getElementById("tfId").disabled = false;
   document.getElementById("tfLabel").value = "";
   document.getElementById("tfColor").value = "#1a73e8";
-  document.getElementById("tfCmd").value = "";
+  var cmdField = document.getElementById("tfCmd");
+  cmdField.value = "";
+  cmdField.placeholder = "(optional)";
   document.getElementById("tfSave").textContent = "Add tenant";
   tenantFormEl.classList.remove("visible");
 }
@@ -152,8 +196,9 @@ function saveTenant() {
 
   // Preserve brand from existing tenant (daemon-managed field)
   var existing = config.tenants[id];
-  var entry = { browser_cmd: cmd || null, label: label || id, color: color };
-  if (existing && existing.brand) {
+  var entry = { label: label || id, color: color };
+  entry.browser_cmd = cmd || null;
+  if (existing && existing.brand !== undefined) {
     entry.brand = existing.brand;
   }
   config.tenants[id] = entry;
