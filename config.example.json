@@ -4,7 +4,8 @@
     "host-machine": {
       "browser_cmd": "chromium",
       "label": "Host",
-      "color": "#4285F4"
+      "color": "#4285F4",
+      "brand": "Google Chrome"
     },
     "work-container": {
       "browser_cmd": "machinectl shell work-container /usr/bin/chromium",

@@ -33,8 +33,8 @@ sequenceDiagram
     participant ExtB as Extension (Tenant B)
 
     Note over BridgeA,BridgeB: Bridges register on startup
-    BridgeA->>Daemon: REGISTER tenant-a
-    BridgeB->>Daemon: REGISTER tenant-b
+    BridgeA->>Daemon: REGISTER tenant-a Google Chrome
+    BridgeB->>Daemon: REGISTER tenant-b Microsoft Edge
 
     ExtA->>BridgeA: Open url
     Note over BridgeA: Injects hostname
@@ -113,7 +113,7 @@ its first argument) and reloads on changes. See
 
 | Field | Description |
 |-------|-------------|
-| `tenants` | Hostname → `{ browser_cmd, label, color }`. Keys must match actual hostnames. |
+| `tenants` | Hostname → `{ browser_cmd, label, color, brand? }`. Keys must match actual hostnames. `brand` is optional and auto-populated on registration. |
 | `rules` | Regex patterns, evaluated top-to-bottom. First match wins. |
 | `defaults.unmatched` | `"local"` or a tenant hostname for unmatched URLs. |
 | `defaults.cooldown_seconds` | Suppress repeated (tenant, URL) routing within this window. |

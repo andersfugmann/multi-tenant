@@ -84,7 +84,7 @@ let format_response : type a. a Protocol.command -> (a, string) Result.t -> stri
   | Error msg -> Printf.sprintf "Error: %s" msg
   | Ok value ->
     (match cmd with
-     | Protocol.Register -> "OK"
+     | Protocol.Register _ -> "OK"
      | Protocol.Open _ ->
        (match value with
         | Local -> "Local"
@@ -143,13 +143,13 @@ let run_register ~net =
     Eio.Net.connect ~sw net (`Unix sock_path)
   in
   let server_cmd : unit Protocol.server_command =
-    { tenant; command = Register }
+    { tenant; command = Register "" }
   in
   let line = Protocol.serialize_server_command server_cmd in
   Eio.Flow.copy_string (line ^ "\n") flow;
   let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
   let first_line = Eio.Buf_read.line reader in
-  (match Protocol.deserialize_response Register first_line with
+  (match Protocol.deserialize_response (Register "") first_line with
    | Ok () -> printf "Registered as %s\n%!" tenant
    | Error msg ->
      eprintf "Registration failed: %s\n%!" msg;
@@ -245,7 +245,7 @@ let bridge_command_fiber ~net ~tenant ~stdin_flow
 
 (* -- Bridge: push fiber (connect once, no retry) *)
 
-let bridge_push_fiber ~net ~tenant
+let bridge_push_fiber ~net ~tenant ~brand
     ~(write_out : Yojson.Safe.t -> unit) : unit =
   let sock_path = socket_path () in
   match
@@ -254,13 +254,13 @@ let bridge_push_fiber ~net ~tenant
       Eio.Net.connect ~sw net (`Unix sock_path)
     in
     let server_cmd : unit Protocol.server_command =
-      { tenant; command = Register }
+      { tenant; command = Register brand }
     in
     let line = Protocol.serialize_server_command server_cmd in
     Eio.Flow.copy_string (line ^ "\n") flow;
     let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
     let first_line = Eio.Buf_read.line reader in
-    (match Protocol.deserialize_response Register first_line with
+    (match Protocol.deserialize_response (Register brand) first_line with
      | Ok () -> ()
      | Error _msg -> ());
     let rec read_loop () =
@@ -289,13 +289,29 @@ let run_bridge env =
     Eio.Mutex.use_rw ~protect:true stdout_mutex (fun () ->
         write_native_message stdout_flow json)
   in
+  (* Read first message from extension: Register with brand *)
+  let brand =
+    match read_native_message stdin_flow with
+    | Some json ->
+      (match Protocol.deserialize_command_json json with
+       | Ok (Command (Register brand)) ->
+         let resp = Protocol.bridge_response_to_yojson (Register brand) (Ok ()) in
+         write_out resp;
+         brand
+       | _ ->
+         let resp = Protocol.Wire.(bridge_message_to_yojson
+           (Response (Err { message = "expected Register as first message" }))) in
+         write_out resp;
+         "")
+    | None -> ""
+  in
   Eio.Fiber.both
     (fun () ->
       bridge_command_fiber ~net ~tenant
         ~stdin_flow
         ~write_out)
     (fun () ->
-      bridge_push_fiber ~net ~tenant
+      bridge_push_fiber ~net ~tenant ~brand
         ~write_out)
 
 (* -- Detect if running as native messaging host *)

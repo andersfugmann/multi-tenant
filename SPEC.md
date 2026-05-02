@@ -18,7 +18,7 @@ The daemon listens on a single Unix socket (default `/run/user/<uid>/url-router.
 
 ### Registered connections
 
-A client sends `register <tenant_id>` as its first message. On success, the connection becomes long-lived and read-only from the client's perspective. The daemon pushes URL open requests to the client by writing `NAVIGATE <url>` lines on this connection. When the connection drops, the tenant is unregistered.
+A client sends `register <tenant_id> <brand>` as its first message, where `<brand>` is an optional browser brand string (e.g. "Google Chrome", "Microsoft Edge"). On success, the connection becomes long-lived and read-only from the client's perspective. The daemon pushes URL open requests to the client by writing `NAVIGATE <url>` lines on this connection. When the connection drops, the tenant is unregistered.
 
 Only one registered connection per tenant is allowed. Duplicate registrations are rejected.
 
@@ -57,7 +57,7 @@ All commands may return `ERR <message>` on failure.
 
 | Command | Description | Responses |
 |---|---|---|
-| `REGISTER <tenant_id>` | Register as a listener for this tenant | OK, ERR |
+| `REGISTER <tenant_id> <brand>` | Register as a listener for this tenant | OK, ERR |
 | `OPEN <tenant_id> <url>` | Route a URL (tenant_id = source tenant) | LOCAL, REMOTE, ERR |
 | `OPEN-ON <tenant_id> <target> <url>` | Send URL to a specific target tenant | REMOTE, ERR |
 | `TEST <tenant_id> <url>` | Dry-run rule evaluation | MATCH, NOMATCH, ERR |
@@ -102,8 +102,9 @@ The url-router-client binary operates in two modes:
 Activated when the browser spawns it (no CLI arguments or a `chrome-extension://` argument). It:
 
 1. Reads the system hostname to determine its tenant ID.
-2. Opens a registered connection to the daemon and sends `register <hostname>`. A background thread reads `NAVIGATE` pushes from this connection and forwards them to the browser extension as JSON messages on stdout.
-3. Reads JSON commands from the browser extension on stdin. For each command, it opens a new one-shot connection to the daemon, translates the JSON to a protocol line (injecting the tenant ID), reads the response, translates it back to JSON, and writes it to stdout.
+2. Waits for a `Register` command from the extension containing the browser brand string.
+3. Opens a registered connection to the daemon and sends `REGISTER <hostname> <brand>`. A background thread reads `NAVIGATE` pushes from this connection and forwards them to the browser extension as JSON messages on stdout.
+4. Reads JSON commands from the browser extension on stdin. For each command, it opens a new one-shot connection to the daemon, translates the JSON to a protocol line (injecting the tenant ID), reads the response, translates it back to JSON, and writes it to stdout.
 
 The extension never sends or knows its own tenant ID — the native messaging host adds it transparently.
 
@@ -159,10 +160,12 @@ Clicking the extension icon shows:
 The daemon reads its configuration from a JSON file. The configuration contains:
 
 - **socket** — path to the Unix socket (defaults to `/run/user/<uid>/url-router.sock`)
-- **tenants** — a map from hostname to tenant settings (browser command, badge label, badge color)
+- **tenants** — a map from hostname to tenant settings (browser command, badge label, badge color, browser brand)
 - **rules** — an ordered list of routing rules (regex pattern, target tenant, enabled flag)
 - **defaults** — unmatched behavior, notification settings, cooldown duration, browser launch timeout
 
 The daemon watches the file for changes and reloads automatically. The extension can also replace the configuration via `set-config`.
 
 Tenant map keys must match the machine's actual hostname. The `browser_cmd` must be the actual browser binary (not `xdg-open`, which would loop when url-router is the default URL handler). For containers, the command includes `machinectl shell`.
+
+The `brand` field is optional and is automatically populated by the daemon when a tenant registers. It stores the browser brand reported by the extension (e.g. "Google Chrome", "Microsoft Edge") and is updated on every reconnect.

@@ -98,6 +98,29 @@ function url_router_on_message_json(callback) {
   });
 }
 
+//Provides: url_router_get_browser_brand
+function url_router_get_browser_brand() {
+  if (typeof navigator !== "undefined" && navigator.userAgentData
+      && navigator.userAgentData.brands) {
+    var dominated = ["Chromium", "Not;A=Brand", "Not A;Brand", "Not_A Brand",
+                     "Not/A)Brand", "Not)A;Brand"];
+    var dominated_set = {};
+    for (var i = 0; i < dominated.length; i++) {
+      dominated_set[dominated[i]] = true;
+    }
+    var brands = navigator.userAgentData.brands;
+    for (var j = 0; j < brands.length; j++) {
+      if (!dominated_set[brands[j].brand]) {
+        return brands[j].brand;
+      }
+    }
+    if (brands.length > 0) {
+      return brands[0].brand;
+    }
+  }
+  return "";
+}
+
 //Provides: url_router_log
 function url_router_log(msg) {
   console.log("[url-router] " + msg);

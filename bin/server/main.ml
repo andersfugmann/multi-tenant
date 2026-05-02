@@ -25,6 +25,7 @@ type coordinator_msg =
     }
   | Register_tenant of {
       tenant : string;
+      brand : string;
       push_stream : string Eio.Stream.t;
       reply : (unit, string) Result.t Eio.Promise.u;
     }
@@ -279,8 +280,8 @@ let dispatch_command :
  fun state tenant cmd ->
   let (state, response_line) =
     match cmd with
-    | Protocol.Register ->
-      (state, Protocol.serialize_response Protocol.Register
+    | Protocol.Register _ ->
+      (state, Protocol.serialize_response (Protocol.Register "")
          (Error "unexpected REGISTER in command mode"))
     | Protocol.Open url ->
       let (state, resp) = handle_open state tenant url in
@@ -332,7 +333,7 @@ let rec coordinator_loop (state : state) (inbox : coordinator_msg Eio.Stream.t) 
       let (state, response_line) = dispatch_line state line in
       Eio.Promise.resolve reply response_line;
       state
-    | Register_tenant { tenant; push_stream; reply } ->
+    | Register_tenant { tenant; brand; push_stream; reply } ->
       (match Map.mem state.registry tenant with
        | true ->
          Eio.Promise.resolve reply (Error "tenant already registered");
@@ -341,20 +342,29 @@ let rec coordinator_loop (state : state) (inbox : coordinator_msg Eio.Stream.t) 
        | false ->
          let registry = Map.set state.registry ~key:tenant ~data:push_stream in
          Eio.Promise.resolve reply (Ok ());
-         printf "[url-router] tenant %s registered\n%!" tenant;
+         printf "[url-router] tenant %s registered (brand=%s)\n%!" tenant brand;
          let state = { state with registry } in
-         (* Auto-add tenant to config if not already present *)
-         (match List.Assoc.find state.config.tenants ~equal:String.equal tenant with
-          | Some _ -> state
-          | None ->
-            let new_tenant : Protocol.tenant_config =
-              { browser_cmd = ""; label = tenant; color = "#808080" }
-            in
-            let tenants = state.config.tenants @ [ (tenant, new_tenant) ] in
-            let config = { state.config with tenants } in
-            printf "[url-router] auto-added tenant %s to config\n%!" tenant;
-            (try save_config_to_path state.config_path config with _ -> ());
-            { state with config }))
+         let brand_opt =
+           match String.is_empty brand with
+           | true -> None
+           | false -> Some brand
+         in
+         (* Update or auto-add tenant config with brand *)
+         let tenants =
+           match List.Assoc.find state.config.tenants ~equal:String.equal tenant with
+           | Some existing ->
+             let updated = { existing with brand = brand_opt } in
+             List.Assoc.add state.config.tenants ~equal:String.equal tenant updated
+           | None ->
+             let new_tenant : Protocol.tenant_config =
+               { browser_cmd = ""; label = tenant; color = "#808080"; brand = brand_opt }
+             in
+             printf "[url-router] auto-added tenant %s to config\n%!" tenant;
+             state.config.tenants @ [ (tenant, new_tenant) ]
+         in
+         let config = { state.config with tenants } in
+         (try save_config_to_path state.config_path config with _ -> ());
+         { state with config })
     | Unregister_tenant { tenant } ->
       let registry = Map.remove state.registry tenant in
       printf "[url-router] tenant %s unregistered\n%!" tenant;
@@ -367,16 +377,16 @@ let rec coordinator_loop (state : state) (inbox : coordinator_msg Eio.Stream.t) 
 
 (* -- Registration (long-lived connection) *)
 
-let handle_register (inbox : coordinator_msg Eio.Stream.t) tenant flow reader =
+let handle_register (inbox : coordinator_msg Eio.Stream.t) ~tenant ~brand flow reader =
   let push_stream = Eio.Stream.create 16 in
   let (promise, reply) = Eio.Promise.create () in
-  Eio.Stream.add inbox (Register_tenant { tenant; push_stream; reply });
+  Eio.Stream.add inbox (Register_tenant { tenant; brand; push_stream; reply });
   match Eio.Promise.await promise with
   | Error msg ->
-    let err = Protocol.serialize_response Register (Error msg) in
+    let err = Protocol.serialize_response (Register brand) (Error msg) in
     Eio.Flow.copy_string (err ^ "\n") flow
   | Ok () ->
-    let ok = Protocol.serialize_response Register (Ok ()) in
+    let ok = Protocol.serialize_response (Register brand) (Ok ()) in
     Eio.Flow.copy_string (ok ^ "\n") flow;
     (match
        Eio.Fiber.both
@@ -411,9 +421,9 @@ let handle_connection (inbox : coordinator_msg Eio.Stream.t) flow =
        let resp = Printf.sprintf "ERR %s" msg in
        printf "[url-router] res: %s\n%!" resp;
        Eio.Flow.copy_string (resp ^ "\n") flow
-     | Ok (Server_command { tenant; command = Register }) ->
-       printf "[url-router] res[%s]: registering\n%!" tenant;
-       handle_register inbox tenant flow reader
+     | Ok (Server_command { tenant; command = Register brand }) ->
+       printf "[url-router] res[%s]: registering (brand=%s)\n%!" tenant brand;
+       handle_register inbox ~tenant ~brand flow reader
      | Ok (Server_command _) ->
        let (promise, reply) = Eio.Promise.create () in
        Eio.Stream.add inbox (Dispatch { line; reply });

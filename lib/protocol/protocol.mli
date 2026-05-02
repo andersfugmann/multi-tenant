@@ -16,6 +16,7 @@ type tenant_config = {
   browser_cmd : string;
   label : string;
   color : string;
+  brand : string option; [@default None]
 }
 [@@deriving yojson]
 
@@ -55,7 +56,7 @@ type test_result =
 (** {1 GADT command type} *)
 
 type _ command =
-  | Register : unit command
+  | Register : string -> unit command
   | Open : url -> route_result command
   | Open_on : tenant_id * url -> route_result command
   | Test : url -> test_result command
@@ -100,7 +101,7 @@ val deserialize_push : string -> (packed_server_push, string) Result.t
 
 module Wire : sig
   type command =
-    | Register
+    | Register of { brand : string }
     | Open of { url : string }
     | Open_on of { target : string; url : string }
     | Test of { url : string }

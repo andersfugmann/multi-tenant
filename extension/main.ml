@@ -63,6 +63,8 @@ external on_message_json_js :
 
 external log_js : Js.js_string Js.t -> unit = "url_router_log"
 
+external get_browser_brand_js : unit -> Js.js_string Js.t = "url_router_get_browser_brand"
+
 external create_window_js : Js.js_string Js.t -> unit = "url_router_create_window"
 
 (* -- Logging *)
@@ -213,7 +215,12 @@ let connect (_state : state) : state =
     p
   with
   | p ->
+    let brand = Js.to_string (get_browser_brand_js ()) in
+    log (Printf.sprintf "Browser brand: %s" brand);
     let state = { native_port = Some p; pending_callbacks = []; tenant_names = [] } in
+    let state =
+      send_command state (Command (Register brand)) (fun _wire_resp -> ())
+    in
     send_command state (Command Get_config) (fun wire_resp ->
         match Protocol.response_of_wire Get_config wire_resp with
         | Ok cfg ->
