@@ -3,3 +3,10 @@ _build/
 *.merlin
 .merlin
 extension/node_modules/
+debian/.debhelper/
+debian/debhelper-build-stamp
+debian/files
+debian/*.substvars
+debian/*.postrm.debhelper
+debian/url-router/
+debian/url-router-client/

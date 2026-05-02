@@ -1,0 +1,36 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	dune build bin/server/main.exe bin/client/main.exe extension/main.bc.js
+
+override_dh_auto_test:
+
+override_dh_auto_install:
+	install -D -m 755 _build/default/bin/server/main.exe \
+		debian/url-router/usr/bin/url-router
+	install -D -m 755 _build/default/bin/client/main.exe \
+		debian/url-router-client/usr/bin/url-router-client
+	install -D -m 644 debian/url_router.json \
+		debian/url-router-client/etc/chromium/native-messaging-hosts/url_router.json
+	install -D -m 644 debian/url_router.json \
+		debian/url-router-client/etc/opt/edge/native-messaging-hosts/url_router.json
+	install -d debian/url-router-client/usr/share/url-router/extension/icons
+	install -m 644 extension/manifest.json \
+		debian/url-router-client/usr/share/url-router/extension/
+	install -m 644 extension/popup.html \
+		debian/url-router-client/usr/share/url-router/extension/
+	install -m 644 extension/popup.js \
+		debian/url-router-client/usr/share/url-router/extension/
+	install -m 644 _build/default/extension/main.bc.js \
+		debian/url-router-client/usr/share/url-router/extension/main.js
+	install -m 644 extension/icons/* \
+		debian/url-router-client/usr/share/url-router/extension/icons/
+
+override_dh_auto_clean:
+	dune clean
+
+override_dh_dwz:
+override_dh_strip:

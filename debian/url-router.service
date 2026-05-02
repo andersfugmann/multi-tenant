@@ -1,0 +1,12 @@
+[Unit]
+Description=URL Router daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/url-router
+Restart=on-failure
+RuntimeDirectory=url-router
+
+[Install]
+WantedBy=multi-user.target
