@@ -21,10 +21,21 @@ let browser_cmd_of_brand (brand : string option) : string option =
 
 type cooldown_entry = { key : string; expires : float }
 
+type pending_delivery = {
+  url : string;
+  target : string;
+  reply : (Protocol.route_result, string) Result.t Eio.Promise.u;
+}
+
+type starting_tenant = {
+  pending : pending_delivery list;
+}
+
 type state = {
   config : Protocol.config;
   config_path : string;
   registry : string Eio.Stream.t Map.M(String).t;
+  starting : starting_tenant Map.M(String).t;
   cooldowns : cooldown_entry list;
   start_time : float;
 }
@@ -44,6 +55,7 @@ type coordinator_msg =
     }
   | Unregister_tenant of { tenant : string }
   | Update_config of Protocol.config
+  | Launch_timeout of { tenant : string }
 
 let default_config () : Protocol.config =
   {
@@ -156,54 +168,89 @@ let check_and_prune_cooldowns (cooldowns : cooldown_entry list) ~now ~key :
   in
   go [] cooldowns
 
-(* -- Push to tenant *)
+(* -- Launch browser process (fire-and-forget) *)
 
-let push_navigate (state : state) (target : string) (url : string) :
-    (unit, string) Result.t =
+let launch_browser (cmd : string) : unit =
+  let dev_null = Unix.openfile "/dev/null" [ Unix.O_RDWR ] 0o000 in
+  let pid =
+    Unix.create_process "/bin/sh" [| "/bin/sh"; "-c"; cmd |]
+      dev_null dev_null dev_null
+  in
+  Unix.close dev_null;
+  printf "[url-router] launched browser (pid %d): %s\n%!" pid cmd
+
+(* -- Deliver URL to tenant (idempotent, may defer) *)
+
+let deliver_url (state : state) (target : string) (url : string)
+    ~(sw : Eio.Switch.t) ~(clock : _ Eio.Time.clock)
+    ~(inbox : coordinator_msg Eio.Stream.t) :
+    state * (Protocol.route_result, string) Result.t Eio.Promise.t =
   match Map.find state.registry target with
-  | None -> Error (Printf.sprintf "tenant %s not registered" target)
   | Some stream ->
     let push_line = Protocol.serialize_push (Navigate url) in
     Eio.Stream.add stream push_line;
-    Ok ()
+    (state, Eio.Promise.create_resolved (Ok (Protocol.Remote target)))
+  | None ->
+    match Map.find state.starting target with
+    | Some sentinel ->
+      let (promise, resolver) = Eio.Promise.create () in
+      let pending = { url; target; reply = resolver } :: sentinel.pending in
+      let starting = Map.set state.starting ~key:target ~data:{ pending } in
+      printf "[url-router] queued URL for starting tenant %s: %s\n%!" target url;
+      ({ state with starting }, promise)
+    | None ->
+      let browser_cmd =
+        List.Assoc.find state.config.tenants ~equal:String.equal target
+        |> Option.bind ~f:(fun (tc : Protocol.tenant_config) -> tc.browser_cmd)
+      in
+      (match browser_cmd with
+       | None ->
+         let msg = Printf.sprintf "tenant %s not registered" target in
+         (state, Eio.Promise.create_resolved (Error msg))
+       | Some cmd ->
+         let (promise, resolver) = Eio.Promise.create () in
+         let sentinel = { pending = [ { url; target; reply = resolver } ] } in
+         let starting = Map.set state.starting ~key:target ~data:sentinel in
+         launch_browser cmd;
+         let timeout = Float.of_int state.config.defaults.browser_launch_timeout in
+         Eio.Fiber.fork ~sw (fun () ->
+           Eio.Time.sleep clock timeout;
+           Eio.Stream.add inbox (Launch_timeout { tenant = target }));
+         printf "[url-router] starting tenant %s (timeout %.0fs)\n%!" target timeout;
+         ({ state with starting }, promise))
 
-(* -- Command handlers (pure state transformers) *)
+(* -- Command handlers *)
 
-let handle_open (state : state) (tenant : string) (url : string) :
-    state * (Protocol.route_result, string) Result.t =
+let handle_open (state : state) (tenant : string) (url : string)
+    ~sw ~clock ~inbox :
+    state * (Protocol.route_result, string) Result.t Eio.Promise.t =
   let target, _idx =
     evaluate_rules state.config.rules url state.config.defaults.unmatched
   in
   match String.equal tenant "default" with
   | true ->
-    (match push_navigate state target url with
-     | Ok () -> (state, Ok (Remote target))
-     | Error msg -> (state, Error msg))
+    deliver_url state target url ~sw ~clock ~inbox
   | false ->
     let now = Unix.gettimeofday () in
     let key = cooldown_key tenant url in
     let (found, pruned) = check_and_prune_cooldowns state.cooldowns ~now ~key in
     let state = { state with cooldowns = pruned } in
     (match found with
-     | true -> (state, Ok Local)
+     | true -> (state, Eio.Promise.create_resolved (Ok Protocol.Local))
      | false ->
        (match String.equal target tenant || String.equal target "local" with
-        | true -> (state, Ok Local)
+        | true -> (state, Eio.Promise.create_resolved (Ok Protocol.Local))
         | false ->
-          (match push_navigate state target url with
-           | Ok () ->
-             let cooldown = Float.of_int state.config.defaults.cooldown_seconds in
-             let state =
-               { state with cooldowns = { key; expires = now +. cooldown } :: state.cooldowns }
-             in
-             (state, Ok (Remote target))
-           | Error msg -> (state, Error msg))))
+          let cooldown = Float.of_int state.config.defaults.cooldown_seconds in
+          let state =
+            { state with cooldowns = { key; expires = now +. cooldown } :: state.cooldowns }
+          in
+          deliver_url state target url ~sw ~clock ~inbox))
 
-let handle_open_on (state : state) (target : string) (url : string) :
-    state * (Protocol.route_result, string) Result.t =
-  match push_navigate state target url with
-  | Ok () -> (state, Ok (Remote target))
-  | Error msg -> (state, Error msg)
+let handle_open_on (state : state) (target : string) (url : string)
+    ~sw ~clock ~inbox :
+    state * (Protocol.route_result, string) Result.t Eio.Promise.t =
+  deliver_url state target url ~sw ~clock ~inbox
 
 let handle_test (state : state) (url : string) :
     state * (Protocol.test_result, string) Result.t =
@@ -288,64 +335,86 @@ let handle_delete_rule (state : state) (idx : int) :
 
 (* -- Command dispatch *)
 
+let resolve_reply (reply : string Eio.Promise.u)
+    (tenant : string) (line : string)
+    (response_line : string) : unit =
+  printf "[url-router] req[%s]: %s\n[url-router] res[%s]: %s\n%!" tenant line tenant response_line;
+  Eio.Promise.resolve reply response_line
+
 let dispatch_command :
-    type a. state -> Protocol.tenant_id -> a Protocol.command -> state * string =
- fun state tenant cmd ->
-  let (state, response_line) =
-    match cmd with
-    | Protocol.Register _ ->
-      (state, Protocol.serialize_response (Protocol.Register None)
-         (Error "unexpected REGISTER in command mode"))
-    | Protocol.Open url ->
-      let (state, resp) = handle_open state tenant url in
-      (state, Protocol.serialize_response (Open url) resp)
-    | Protocol.Open_on (target, url) ->
-      let (state, resp) = handle_open_on state target url in
-      (state, Protocol.serialize_response (Open_on (target, url)) resp)
-    | Protocol.Test url ->
-      let (state, resp) = handle_test state url in
-      (state, Protocol.serialize_response (Test url) resp)
-    | Protocol.Get_config ->
-      (state, Protocol.serialize_response Get_config (Ok state.config))
-    | Protocol.Set_config cfg ->
-      let (state, resp) = handle_set_config state cfg in
-      (state, Protocol.serialize_response (Set_config cfg) resp)
-    | Protocol.Add_rule rule ->
-      let (state, resp) = handle_add_rule state rule in
-      (state, Protocol.serialize_response (Add_rule rule) resp)
-    | Protocol.Update_rule (idx, rule) ->
-      let (state, resp) = handle_update_rule state idx rule in
-      (state, Protocol.serialize_response (Update_rule (idx, rule)) resp)
-    | Protocol.Delete_rule idx ->
-      let (state, resp) = handle_delete_rule state idx in
-      (state, Protocol.serialize_response (Delete_rule idx) resp)
-    | Protocol.Status ->
-      let (state, resp) = handle_status state in
-      (state, Protocol.serialize_response Status resp)
-  in
-  (state, response_line)
+    type a. state -> Protocol.tenant_id -> a Protocol.command ->
+    reply:string Eio.Promise.u -> line:string ->
+    sw:Eio.Switch.t -> clock:_ Eio.Time.clock ->
+    inbox:coordinator_msg Eio.Stream.t -> state =
+ fun state tenant cmd ~reply ~line ~sw ~clock ~inbox ->
+  match cmd with
+  | Protocol.Register _ ->
+    let resp = Protocol.serialize_response (Protocol.Register None)
+        (Error "unexpected REGISTER in command mode") in
+    resolve_reply reply tenant line resp;
+    state
+  | Protocol.Open url ->
+    let (state, promise) = handle_open state tenant url ~sw ~clock ~inbox in
+    Eio.Fiber.fork ~sw (fun () ->
+      let result = Eio.Promise.await promise in
+      let resp = Protocol.serialize_response (Open url) result in
+      resolve_reply reply tenant line resp);
+    state
+  | Protocol.Open_on (target, url) ->
+    let (state, promise) = handle_open_on state target url ~sw ~clock ~inbox in
+    Eio.Fiber.fork ~sw (fun () ->
+      let result = Eio.Promise.await promise in
+      let resp = Protocol.serialize_response (Open_on (target, url)) result in
+      resolve_reply reply tenant line resp);
+    state
+  | Protocol.Test url ->
+    let (state, resp) = handle_test state url in
+    resolve_reply reply tenant line (Protocol.serialize_response (Test url) resp);
+    state
+  | Protocol.Get_config ->
+    resolve_reply reply tenant line (Protocol.serialize_response Get_config (Ok state.config));
+    state
+  | Protocol.Set_config cfg ->
+    let (state, resp) = handle_set_config state cfg in
+    resolve_reply reply tenant line (Protocol.serialize_response (Set_config cfg) resp);
+    state
+  | Protocol.Add_rule rule ->
+    let (state, resp) = handle_add_rule state rule in
+    resolve_reply reply tenant line (Protocol.serialize_response (Add_rule rule) resp);
+    state
+  | Protocol.Update_rule (idx, rule) ->
+    let (state, resp) = handle_update_rule state idx rule in
+    resolve_reply reply tenant line (Protocol.serialize_response (Update_rule (idx, rule)) resp);
+    state
+  | Protocol.Delete_rule idx ->
+    let (state, resp) = handle_delete_rule state idx in
+    resolve_reply reply tenant line (Protocol.serialize_response (Delete_rule idx) resp);
+    state
+  | Protocol.Status ->
+    let (state, resp) = handle_status state in
+    resolve_reply reply tenant line (Protocol.serialize_response Status resp);
+    state
 
 (* -- Coordinator loop *)
 
-let dispatch_line (state : state) (line : string) : state * string =
+let dispatch_line (state : state) (line : string) ~reply
+    ~sw ~clock ~inbox : state =
   match Protocol.deserialize_server_command line with
   | Error msg ->
     let resp = Printf.sprintf "ERR %s" msg in
     printf "[url-router] req: %s\n[url-router] res: %s\n%!" line resp;
-    (state, resp)
+    Eio.Promise.resolve reply resp;
+    state
   | Ok (Server_command { tenant; command }) ->
-    let (state, resp) = dispatch_command state tenant command in
-    printf "[url-router] req[%s]: %s\n[url-router] res[%s]: %s\n%!" tenant line tenant resp;
-    (state, resp)
+    dispatch_command state tenant command ~reply ~line ~sw ~clock ~inbox
 
-let rec coordinator_loop (state : state) (inbox : coordinator_msg Eio.Stream.t) : unit =
+let rec coordinator_loop (state : state) (inbox : coordinator_msg Eio.Stream.t)
+    ~(sw : Eio.Switch.t) ~(clock : _ Eio.Time.clock) : unit =
   let msg = Eio.Stream.take inbox in
   let state =
     match msg with
     | Dispatch { line; reply } ->
-      let (state, response_line) = dispatch_line state line in
-      Eio.Promise.resolve reply response_line;
-      state
+      dispatch_line state line ~reply ~sw ~clock ~inbox
     | Register_tenant { tenant; brand; push_stream; reply } ->
       (match Map.mem state.registry tenant with
        | true ->
@@ -358,6 +427,19 @@ let rec coordinator_loop (state : state) (inbox : coordinator_msg Eio.Stream.t) 
          printf "[url-router] tenant %s registered (brand=%s)\n%!" tenant
            (Option.value brand ~default:"(none)");
          let state = { state with registry } in
+         (* Flush pending deliveries if tenant was starting *)
+         let state =
+           match Map.find state.starting tenant with
+           | None -> state
+           | Some sentinel ->
+             List.iter sentinel.pending ~f:(fun pd ->
+               let push_line = Protocol.serialize_push (Navigate pd.url) in
+               Eio.Stream.add push_stream push_line;
+               Eio.Promise.resolve pd.reply (Ok (Protocol.Remote tenant));
+               printf "[url-router] delivered pending URL to %s: %s\n%!" tenant pd.url);
+             let starting = Map.remove state.starting tenant in
+             { state with starting }
+         in
          (* Update or auto-add tenant config with brand *)
          let suggested_cmd = browser_cmd_of_brand brand in
          let tenants =
@@ -387,8 +469,19 @@ let rec coordinator_loop (state : state) (inbox : coordinator_msg Eio.Stream.t) 
     | Update_config config ->
       printf "[url-router] config reloaded from disk\n%!";
       { state with config }
+    | Launch_timeout { tenant } ->
+      (match Map.find state.starting tenant with
+       | None -> state
+       | Some sentinel ->
+         List.iter sentinel.pending ~f:(fun pd ->
+           let msg = Printf.sprintf "tenant %s failed to start within timeout" tenant in
+           Eio.Promise.resolve pd.reply (Error msg);
+           printf "[url-router] timeout: failed to deliver URL to %s: %s\n%!" tenant pd.url);
+         let starting = Map.remove state.starting tenant in
+         printf "[url-router] tenant %s start timed out\n%!" tenant;
+         { state with starting })
   in
-  coordinator_loop state inbox
+  coordinator_loop state inbox ~sw ~clock
 
 (* -- Registration (long-lived connection) *)
 
@@ -472,6 +565,7 @@ let () =
       config;
       config_path;
       registry = Map.empty (module String);
+      starting = Map.empty (module String);
       cooldowns = [];
       start_time = Unix.gettimeofday ();
     }
@@ -485,7 +579,7 @@ let () =
   in
   printf "[url-router] listening on %s\n%!" socket_path;
   Eio.Fiber.all [
-    (fun () -> coordinator_loop initial_state inbox);
+    (fun () -> coordinator_loop initial_state inbox ~sw ~clock);
     (fun () -> config_watcher config_path inbox clock);
     (fun () ->
       let rec accept_loop () =
