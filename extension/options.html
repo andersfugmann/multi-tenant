@@ -123,9 +123,14 @@
         <div class="hint">Override the system hostname used as tenant ID. Leave blank to use the machine's hostname.</div>
       </div>
       <div class="form-group">
-        <label for="socketPath">Socket path</label>
-        <input type="text" id="socketPath" placeholder="/run/user/1000/alloy.sock">
-        <div class="hint">Override the Unix socket the bridge connects to. Leave blank for the default.</div>
+        <label for="daemonHost">Daemon host</label>
+        <input type="text" id="daemonHost" placeholder="127.0.0.1">
+        <div class="hint">IP address or hostname of the Alloy daemon. Leave blank for localhost.</div>
+      </div>
+      <div class="form-group">
+        <label for="daemonPort">Daemon port</label>
+        <input type="text" id="daemonPort" placeholder="7120">
+        <div class="hint">TCP port the daemon listens on. Leave blank for default (7120).</div>
       </div>
       <div class="form-group">
         <label class="checkbox"><input type="checkbox" id="debugLogging"> Enable debug logging</label>

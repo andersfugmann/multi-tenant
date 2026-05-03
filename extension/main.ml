@@ -57,7 +57,7 @@ type event =
   | Bridge_message of { raw : string }
   | Port_disconnected
   | Connect_requested
-  | Connect_with_settings of { port : native_port; tenant_name : string; socket_path : string; debug_logging : bool }
+  | Connect_with_settings of { port : native_port; tenant_name : string; daemon_host : string; daemon_port : string; debug_logging : bool }
   | Context_menu of { menu_id : string; link_url : string; page_url : string; tab_id : int option }
   | Popup_query of { json : Yojson.Safe.t; respond : Yojson.Safe.t -> unit }
   | Setup_menus
@@ -128,18 +128,21 @@ let non_empty (s : string) : string option =
   | true -> None
   | false -> Some s
 
-let connect_with_settings (port : native_port) (tenant_name : string) (socket_path : string) ~(debug_logging : bool) : state =
+let connect_with_settings (port : native_port) (tenant_name : string) (daemon_host : string) (daemon_port : string) ~(debug_logging : bool) : state =
   let brand = non_empty (Chrome_api.Navigator.get_browser_brand ()) in
   let name = non_empty tenant_name in
-  let socket = non_empty socket_path in
-  log (Printf.sprintf "Browser brand: %s, tenant: %s, socket: %s"
+  let address =
+    let h = Option.value (non_empty daemon_host) ~default:"127.0.0.1" in
+    let p = Option.value (non_empty daemon_port) ~default:(Int.to_string Protocol.default_port) in
+    Some (Printf.sprintf "%s:%s" h p)
+  in
+  log (Printf.sprintf "Browser brand: %s, tenant: %s, address: %s"
     (Option.value brand ~default:"(none)")
     (Option.value name ~default:"(default)")
-    (Option.value socket ~default:"(default)"));
+    (Option.value address ~default:"(default)"));
   let state = { native_port = Some port; pending_callbacks = []; tenant_names = []; self_tenant_id = None; debug_logging } in
-  (* Build Wire.Register directly to include socket/name overrides *)
   let register_wire : Protocol.Wire.command =
-    Register { brand; socket; name }
+    Register { brand; address; name }
   in
   let json = Protocol.Wire.command_to_yojson register_wire in
   let state = send_to_bridge state json (fun wire_resp ->
@@ -164,7 +167,7 @@ let connect (_state : state) : state =
     p
   with
   | p ->
-    Chrome_api.Storage.get_local [ "tenant_name"; "socket_path"; "debug_logging" ]
+    Chrome_api.Storage.get_local [ "tenant_name"; "daemon_host"; "daemon_port"; "debug_logging" ]
       ~on_result:(fun pairs ->
         let find k =
           List.Assoc.find pairs ~equal:String.equal k
@@ -175,7 +178,8 @@ let connect (_state : state) : state =
              {
                port = p;
                tenant_name = find "tenant_name";
-               socket_path = find "socket_path";
+               daemon_host = find "daemon_host";
+               daemon_port = find "daemon_port";
                debug_logging = String.equal (find "debug_logging") "true";
              }));
     { native_port = Some p; pending_callbacks = []; tenant_names = []; self_tenant_id = None; debug_logging = false }
@@ -481,8 +485,8 @@ let handle_event (state : state) (event : event) : state =
     Chrome_api.set_timeout (fun () -> push Connect_requested) 2000;
     { initial_state with debug_logging = state.debug_logging }
   | Connect_requested -> connect state
-  | Connect_with_settings { port; tenant_name; socket_path; debug_logging } ->
-    connect_with_settings port tenant_name socket_path ~debug_logging
+  | Connect_with_settings { port; tenant_name; daemon_host; daemon_port; debug_logging } ->
+    connect_with_settings port tenant_name daemon_host daemon_port ~debug_logging
   | Context_menu { menu_id; link_url; page_url; tab_id } ->
     handle_context_menu state menu_id link_url page_url tab_id
   | Popup_query { json; respond } -> handle_popup_query state json respond

@@ -50,7 +50,8 @@ type coordinator_msg =
 
 let default_config () : Protocol.config =
   {
-    socket = Protocol.default_socket_path ();
+    listen = Protocol.default_listen;
+    allowed_networks = Protocol.default_allowed_networks;
     tenants = [];
     rules = [];
     defaults =
@@ -542,27 +543,56 @@ let run config_path =
       start_time = Unix.gettimeofday ();
     }
   in
-  let socket_path = config.socket in
-  (try Unix.unlink socket_path with Unix.Unix_error _ -> ());
   let inbox = Eio.Stream.create 64 in
-  Eio.Switch.run @@ fun sw ->
-  let listening =
-    Eio.Net.listen ~sw ~backlog:128 net (`Unix socket_path)
+  let allowed_networks =
+    List.filter_map config.allowed_networks ~f:Protocol.parse_cidr
   in
-  log "listening on %s" socket_path;
-  Eio.Fiber.all [
-    (fun () -> coordinator_loop initial_state inbox ~sw ~clock);
-    (fun () ->
-      let rec accept_loop () =
-        Eio.Net.accept_fork ~sw listening
-          ~on_error:(fun exn ->
-            log "connection error: %s"
-              (Exn.to_string exn))
-          (fun flow _addr -> handle_connection inbox flow);
-        accept_loop ()
-      in
-      accept_loop ());
-  ]
+  Eio.Switch.run @@ fun sw ->
+  let accept_loop listener =
+    let rec loop () =
+      Eio.Net.accept_fork ~sw listener
+        ~on_error:(fun exn ->
+          log "connection error: %s"
+            (Exn.to_string exn))
+        (fun flow addr ->
+          let allowed =
+            match addr with
+            | `Tcp (ip, _port) ->
+              let ip_str = Unix.string_of_inet_addr (Eio_unix.Net.Ipaddr.to_unix ip) in
+              Protocol.ip_allowed ~allowed_networks ip_str
+            | _ -> true
+          in
+          match allowed with
+          | true -> handle_connection inbox flow
+          | false ->
+            log "rejected connection from disallowed address";
+            Eio.Flow.close flow);
+      loop ()
+    in
+    loop ()
+  in
+  let listeners =
+    List.filter_map config.listen ~f:(fun addr_str ->
+      let { Protocol.host; port } = Protocol.parse_address addr_str in
+      match
+        let ip = Eio_unix.Net.Ipaddr.of_unix (Unix.inet_addr_of_string host) in
+        let listener = Eio.Net.listen ~sw ~backlog:128 ~reuse_addr:true net (`Tcp (ip, port)) in
+        log "listening on %s:%d" host port;
+        listener
+      with
+      | listener -> Some listener
+      | exception exn ->
+        log "warning: failed to listen on %s:%d: %s" host port (Exn.to_string exn);
+        None)
+  in
+  (match listeners with
+   | [] ->
+     log "fatal: no listeners could be started";
+     Stdlib.exit 1
+   | _ -> ());
+  Eio.Fiber.all
+    ((fun () -> coordinator_loop initial_state inbox ~sw ~clock)
+     :: List.map listeners ~f:(fun l -> fun () -> accept_loop l))
 
 let () =
   let open Cmdliner in

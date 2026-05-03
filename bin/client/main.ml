@@ -10,7 +10,7 @@ type cli_mode =
 
 type cli_options = {
   mode : cli_mode;
-  socket : string option;
+  address : string option;
   name : string option;
 }
 
@@ -36,26 +36,26 @@ let parse_index idx_str =
 
 let cli_term () =
   let open Cmdliner in
-  let socket_opt =
-    let doc = "Override daemon socket path." in
+  let address_opt =
+    let doc = "Daemon address (host:port)." in
     Arg.(value & opt (some string) None
-         & info [ "socket"; "s" ] ~docv:"PATH" ~doc)
+         & info [ "address"; "a" ] ~docv:"HOST:PORT" ~doc)
   in
   let name_opt =
     let doc = "Override tenant name." in
     Arg.(value & opt (some string) None
          & info [ "name"; "n" ] ~docv:"TENANT" ~doc)
   in
-  let make_opts mode socket name = { mode; socket; name } in
+  let make_opts mode address name = { mode; address; name } in
   let bridge_cmd =
     let doc = "Run as native messaging bridge for the browser extension." in
     Cmd.v (Cmd.info "bridge" ~doc)
-      Term.(const (make_opts Bridge) $ socket_opt $ name_opt)
+      Term.(const (make_opts Bridge) $ address_opt $ name_opt)
   in
   let register_cmd =
     let doc = "Register as a tenant and stream push messages." in
     Cmd.v (Cmd.info "register" ~doc)
-      Term.(const (make_opts Register_stream) $ socket_opt $ name_opt)
+      Term.(const (make_opts Register_stream) $ address_opt $ name_opt)
   in
   let open_cmd =
     let doc = "Open a URL via the routing daemon." in
@@ -65,7 +65,7 @@ let cli_term () =
     in
     Cmd.v (Cmd.info "open" ~doc)
       Term.(const (fun url -> make_opts (Cli_command (Command (Open url))))
-            $ url $ socket_opt $ name_opt)
+            $ url $ address_opt $ name_opt)
   in
   let open_on_cmd =
     let doc = "Open a URL on a specific tenant." in
@@ -80,7 +80,7 @@ let cli_term () =
     Cmd.v (Cmd.info "open-on" ~doc)
       Term.(const (fun target url ->
               make_opts (Cli_command (Command (Open_on (target, url)))))
-            $ target $ url $ socket_opt $ name_opt)
+            $ target $ url $ address_opt $ name_opt)
   in
   let test_cmd =
     let doc = "Test which tenant a URL would route to." in
@@ -90,13 +90,13 @@ let cli_term () =
     in
     Cmd.v (Cmd.info "test" ~doc)
       Term.(const (fun url -> make_opts (Cli_command (Command (Test url))))
-            $ url $ socket_opt $ name_opt)
+            $ url $ address_opt $ name_opt)
   in
   let get_config_cmd =
     let doc = "Get the current daemon configuration." in
     Cmd.v (Cmd.info "get-config" ~doc)
       Term.(const (make_opts (Cli_command (Command Get_config)))
-            $ socket_opt $ name_opt)
+            $ address_opt $ name_opt)
   in
   let set_config_cmd =
     let doc = "Set the daemon configuration from a JSON file." in
@@ -107,7 +107,7 @@ let cli_term () =
     Cmd.v (Cmd.info "set-config" ~doc)
       Term.(const (fun json_file ->
               make_opts (Cli_command (Command (Set_config (parse_config_file json_file)))))
-            $ json_file $ socket_opt $ name_opt)
+            $ json_file $ address_opt $ name_opt)
   in
   let add_rule_cmd =
     let doc = "Add a routing rule (JSON)." in
@@ -118,7 +118,7 @@ let cli_term () =
     Cmd.v (Cmd.info "add-rule" ~doc)
       Term.(const (fun json_str ->
               make_opts (Cli_command (Command (Add_rule (parse_rule_json json_str)))))
-            $ json_str $ socket_opt $ name_opt)
+            $ json_str $ address_opt $ name_opt)
   in
   let update_rule_cmd =
     let doc = "Update a routing rule at the given index." in
@@ -133,7 +133,7 @@ let cli_term () =
     Cmd.v (Cmd.info "update-rule" ~doc)
       Term.(const (fun idx_str json_str ->
               make_opts (Cli_command (Command (Update_rule (parse_index idx_str, parse_rule_json json_str)))))
-            $ idx $ json_str $ socket_opt $ name_opt)
+            $ idx $ json_str $ address_opt $ name_opt)
   in
   let delete_rule_cmd =
     let doc = "Delete a routing rule at the given index." in
@@ -144,13 +144,13 @@ let cli_term () =
     Cmd.v (Cmd.info "delete-rule" ~doc)
       Term.(const (fun idx_str ->
               make_opts (Cli_command (Command (Delete_rule (parse_index idx_str)))))
-            $ idx $ socket_opt $ name_opt)
+            $ idx $ address_opt $ name_opt)
   in
   let status_cmd =
     let doc = "Show daemon status." in
     Cmd.v (Cmd.info "status" ~doc)
       Term.(const (make_opts (Cli_command (Command Status)))
-            $ socket_opt $ name_opt)
+            $ address_opt $ name_opt)
   in
   Cmd.group (Cmd.info "alloy" ~doc:"Alloy URL routing client")
     [ bridge_cmd; register_cmd; open_cmd; open_on_cmd; test_cmd;
@@ -202,19 +202,25 @@ let format_response : type a. a Protocol.command -> (a, string) Result.t -> stri
          (String.concat ~sep:", " info.registered_tenants)
          info.uptime_seconds)
 
+(* -- Connect to daemon helper *)
+
+let connect_to_daemon ~sw net (addr : Protocol.address) =
+  let ip = Eio_unix.Net.Ipaddr.of_unix (Unix.inet_addr_of_string addr.host) in
+  Eio.Net.connect ~sw net (`Tcp (ip, addr.port))
+
 (* -- Send a command to the daemon and get a response (CLI) *)
 
 let send_command_cli :
     type a.
     net:_ Eio.Net.ty Eio.Resource.t ->
     tenant:string ->
-    sock_path:string ->
+    addr:Protocol.address ->
     a Protocol.command ->
     string =
- fun ~net ~tenant ~sock_path cmd ->
+ fun ~net ~tenant ~addr cmd ->
   Eio.Switch.run @@ fun sw ->
   let flow =
-    Eio.Net.connect ~sw net (`Unix sock_path)
+    connect_to_daemon ~sw net addr
   in
   let server_cmd : a Protocol.server_command = { tenant; command = cmd } in
   let line = Protocol.serialize_server_command server_cmd in
@@ -226,10 +232,10 @@ let send_command_cli :
 
 (* -- CLI register: stay connected, print pushes *)
 
-let run_register ~net ~sock_path ~tenant =
+let run_register ~net ~addr ~tenant =
   Eio.Switch.run @@ fun sw ->
   let flow =
-    Eio.Net.connect ~sw net (`Unix sock_path)
+    connect_to_daemon ~sw net addr
   in
   let server_cmd : string Protocol.server_command =
     { tenant; command = Register None }
@@ -292,14 +298,14 @@ let bridge_send_command :
     type a.
     net:_ Eio.Net.ty Eio.Resource.t ->
     tenant:string ->
-    sock_path:string ->
+    addr:Protocol.address ->
     a Protocol.command ->
     Protocol.Wire.response =
- fun ~net ~tenant ~sock_path cmd ->
+ fun ~net ~tenant ~addr cmd ->
   match
     Eio.Switch.run @@ fun sw ->
     let flow =
-      Eio.Net.connect ~sw net (`Unix sock_path)
+      connect_to_daemon ~sw net addr
     in
     let server_cmd : a Protocol.server_command = { tenant; command = cmd } in
     let line = Protocol.serialize_server_command server_cmd in
@@ -315,7 +321,7 @@ let bridge_send_command :
 
 (* -- Bridge: command fiber *)
 
-let bridge_command_fiber ~net ~tenant ~sock_path ~stdin_flow
+let bridge_command_fiber ~net ~tenant ~addr ~stdin_flow
     ~(write_out : Yojson.Safe.t -> unit) : unit =
   let rec loop () =
     match read_native_message stdin_flow with
@@ -324,7 +330,7 @@ let bridge_command_fiber ~net ~tenant ~sock_path ~stdin_flow
       let wire_response =
         match Protocol.deserialize_command_json json with
         | Error msg -> Protocol.Wire.Err { message = msg }
-        | Ok (Command cmd) -> bridge_send_command ~net ~tenant ~sock_path cmd
+        | Ok (Command cmd) -> bridge_send_command ~net ~tenant ~addr cmd
       in
       let bridge_msg = Protocol.Wire.(bridge_message_to_yojson (Response wire_response)) in
       write_out bridge_msg;
@@ -334,14 +340,14 @@ let bridge_command_fiber ~net ~tenant ~sock_path ~stdin_flow
 
 (* -- Bridge: push fiber (reconnect on disconnect) *)
 
-let bridge_push_fiber ~net ~tenant ~brand ~sock_path
+let bridge_push_fiber ~net ~tenant ~brand ~addr
     ~(write_out : Yojson.Safe.t -> unit)
     ~(on_registered : string -> unit) : unit =
   let rec connect_loop () =
     match
       Eio.Switch.run @@ fun sw ->
       let flow =
-        Eio.Net.connect ~sw net (`Unix sock_path)
+        connect_to_daemon ~sw net addr
       in
       let server_cmd : string Protocol.server_command =
         { tenant; command = Register brand }
@@ -385,13 +391,13 @@ let run_bridge env =
         write_native_message stdout_flow json)
   in
   (* Read first message from extension: Register with brand and optional overrides *)
-  let (brand, tenant, sock_override) =
+  let (brand, tenant, addr_override) =
     match read_native_message stdin_flow with
     | Some json ->
       (match Protocol.Wire.command_of_yojson json with
-       | Ok (Register { brand; socket; name }) ->
+       | Ok (Register { brand; address; name }) ->
          let tenant = Option.value name ~default:default_tenant in
-         (brand, tenant, socket)
+         (brand, tenant, address)
        | _ ->
          let resp = Protocol.Wire.(bridge_message_to_yojson
            (Response (Err { message = "expected Register as first message" }))) in
@@ -399,7 +405,9 @@ let run_bridge env =
          (None, default_tenant, None))
     | None -> (None, default_tenant, None)
   in
-  let sock_path = Option.value sock_override ~default:(Protocol.default_socket_path ()) in
+  let default_addr = Printf.sprintf "127.0.0.1:%d" Protocol.default_port in
+  let addr = Protocol.parse_address
+    (Option.value addr_override ~default:default_addr) in
   let (registered, resolve_registered) = Eio.Promise.create () in
   let on_registered =
     let resolved = ref false in
@@ -419,23 +427,23 @@ let run_bridge env =
   Eio.Fiber.both
     (fun () ->
       Eio.Promise.await registered;
-      bridge_command_fiber ~net ~tenant ~sock_path
+      bridge_command_fiber ~net ~tenant ~addr
         ~stdin_flow
         ~write_out)
     (fun () ->
-      bridge_push_fiber ~net ~tenant ~brand ~sock_path
+      bridge_push_fiber ~net ~tenant ~brand ~addr
         ~write_out
         ~on_registered)
 
 (* -- Main *)
 
-let run_cli { mode; socket; name } =
+let run_cli { mode; address; name } =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
-  let resolve_socket () =
-    match socket with
-    | Some s -> s
-    | None -> Protocol.default_socket_path ()
+  let default_addr = Printf.sprintf "127.0.0.1:%d" Protocol.default_port in
+  let resolve_addr () =
+    Protocol.parse_address
+      (Option.value address ~default:default_addr)
   in
   let resolve_tenant default =
     match name with
@@ -445,10 +453,10 @@ let run_cli { mode; socket; name } =
   match mode with
   | Bridge -> run_bridge env
   | Register_stream ->
-    run_register ~net ~sock_path:(resolve_socket ()) ~tenant:(resolve_tenant (Unix.gethostname ()))
+    run_register ~net ~addr:(resolve_addr ()) ~tenant:(resolve_tenant (Unix.gethostname ()))
   | Cli_command (Command cmd) ->
     let tenant = resolve_tenant "default" in
-    let output = send_command_cli ~net ~tenant ~sock_path:(resolve_socket ()) cmd in
+    let output = send_command_cli ~net ~tenant ~addr:(resolve_addr ()) cmd in
     print_endline output
 
 let () =
@@ -456,7 +464,7 @@ let () =
   (* Chromium launches native messaging hosts with a chrome-extension:// origin arg *)
   match Array.length argv with
   | 2 when String.is_prefix (Array.get argv 1) ~prefix:"chrome-extension://" ->
-    run_cli { mode = Bridge; socket = None; name = None }
+    run_cli { mode = Bridge; address = None; name = None }
   | _ ->
     (match Cmdliner.Cmd.eval_value (cli_term ()) with
      | Ok (`Ok opts) -> run_cli opts

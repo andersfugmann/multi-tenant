@@ -1,10 +1,148 @@
 open !Base
 open !Stdio
 
-(* -- Shared paths *)
+(* -- Constants *)
 
-let default_socket_path () =
-  "/run/user/" ^ Int.to_string (Unix.getuid ()) ^ "/alloy.sock"
+let default_port = 7120
+
+(* -- Address parsing *)
+
+type address = { host : string; port : int }
+
+let parse_address (s : string) : address =
+  let s = String.strip s in
+  (* Handle IPv6 [host]:port *)
+  match String.lsplit2 s ~on:']' with
+  | Some (bracketed, after_bracket) ->
+    let host = String.lstrip ~drop:(Char.equal '[') bracketed in
+    let port =
+      match String.lsplit2 after_bracket ~on:':' with
+      | Some (_, p) -> Int.of_string_opt p |> Option.value ~default:default_port
+      | None -> default_port
+    in
+    { host; port }
+  | None ->
+    (* host:port — find last colon for port *)
+    (match String.rsplit2 s ~on:':' with
+     | Some (host, port_s) ->
+       let port = Int.of_string_opt port_s |> Option.value ~default:default_port in
+       { host; port }
+     | None -> { host = s; port = default_port })
+
+(* -- CIDR parsing and matching *)
+
+type cidr = { addr : bytes; prefix_len : int }
+
+let parse_ipv4 s =
+  let parts = String.split s ~on:'.' in
+  match List.map parts ~f:Int.of_string_opt with
+  | [ Some a; Some b; Some c; Some d ]
+    when a >= 0 && a <= 255 && b >= 0 && b <= 255
+         && c >= 0 && c <= 255 && d >= 0 && d <= 255 ->
+    let buf = Bytes.create 4 in
+    Bytes.set buf 0 (Char.of_int_exn a);
+    Bytes.set buf 1 (Char.of_int_exn b);
+    Bytes.set buf 2 (Char.of_int_exn c);
+    Bytes.set buf 3 (Char.of_int_exn d);
+    Some buf
+  | _ -> None
+
+let expand_ipv6_groups (s : string) : int list option =
+  (* Split into left::right parts *)
+  match String.substr_index s ~pattern:"::" with
+  | Some idx ->
+    let left_str = String.prefix s idx in
+    let right_str = String.drop_prefix s (idx + 2) in
+    let parse_groups str =
+      match String.is_empty str with
+      | true -> []
+      | false -> List.map (String.split str ~on:':') ~f:(fun p -> Int.of_string_opt ("0x" ^ p))
+    in
+    let left = parse_groups left_str in
+    let right = parse_groups right_str in
+    (match List.for_all left ~f:Option.is_some && List.for_all right ~f:Option.is_some with
+     | false -> None
+     | true ->
+       let lv = List.filter_map left ~f:Fn.id in
+       let rv = List.filter_map right ~f:Fn.id in
+       let pad_len = 8 - List.length lv - List.length rv in
+       (match pad_len >= 0 with
+        | true -> Some (lv @ List.init pad_len ~f:(fun _ -> 0) @ rv)
+        | false -> None))
+  | None ->
+    let groups = List.map (String.split s ~on:':') ~f:(fun p -> Int.of_string_opt ("0x" ^ p)) in
+    (match List.length groups = 8 && List.for_all groups ~f:Option.is_some with
+     | true -> Some (List.filter_map groups ~f:Fn.id)
+     | false -> None)
+
+let parse_ipv6 s =
+  match expand_ipv6_groups s with
+  | None -> None
+  | Some vals ->
+    (match List.length vals = 8
+           && List.for_all vals ~f:(fun v -> v >= 0 && v <= 0xffff) with
+     | false -> None
+     | true ->
+       let buf = Bytes.create 16 in
+       List.iteri vals ~f:(fun i v ->
+         Bytes.set buf (i * 2) (Char.of_int_exn ((v lsr 8) land 0xff));
+         Bytes.set buf (i * 2 + 1) (Char.of_int_exn (v land 0xff)));
+       Some buf)
+
+let ip_to_bytes (s : string) : bytes option =
+  match parse_ipv4 s with
+  | Some b -> Some b
+  | None -> parse_ipv6 s
+
+let parse_cidr (s : string) : cidr option =
+  match String.lsplit2 s ~on:'/' with
+  | None ->
+    (match ip_to_bytes s with
+     | Some addr ->
+       let prefix_len = Bytes.length addr * 8 in
+       Some { addr; prefix_len }
+     | None -> None)
+  | Some (ip_str, prefix_str) ->
+    (match (ip_to_bytes ip_str, Int.of_string_opt prefix_str) with
+     | (Some addr, Some prefix_len) ->
+       let max_bits = Bytes.length addr * 8 in
+       (match prefix_len >= 0 && prefix_len <= max_bits with
+        | true -> Some { addr; prefix_len }
+        | false -> None)
+     | _ -> None)
+
+let ip_in_cidr (ip : string) (cidr : cidr) : bool =
+  match ip_to_bytes ip with
+  | None -> false
+  | Some ip_bytes ->
+    (match Bytes.length ip_bytes = Bytes.length cidr.addr with
+     | false -> false
+     | true ->
+       let full_bytes = cidr.prefix_len / 8 in
+       let remaining_bits = cidr.prefix_len % 8 in
+       let rec check_full i =
+         match i >= full_bytes with
+         | true -> true
+         | false ->
+           (match Char.equal (Bytes.get ip_bytes i) (Bytes.get cidr.addr i) with
+            | true -> check_full (i + 1)
+            | false -> false)
+       in
+       (match check_full 0 with
+        | false -> false
+        | true ->
+          (match remaining_bits > 0 with
+           | false -> true
+           | true ->
+             let mask = 0xff lsl (8 - remaining_bits) land 0xff in
+             let ip_byte = Char.to_int (Bytes.get ip_bytes full_bytes) in
+             let cidr_byte = Char.to_int (Bytes.get cidr.addr full_bytes) in
+             Int.equal (ip_byte land mask) (cidr_byte land mask))))
+
+let ip_allowed ~allowed_networks ip =
+  List.exists allowed_networks ~f:(fun cidr -> ip_in_cidr ip cidr)
+
+let default_allowed_networks = [ "127.0.0.0/8"; "::1/128" ]
 
 (* -- Core data types *)
 
@@ -47,8 +185,11 @@ let tenants_of_yojson (json : Yojson.Safe.t) :
     |> Result.map ~f:List.rev
   | _ -> Error "tenants: expected JSON object"
 
+let default_listen = [ "127.0.0.1:7120"; "[::1]:7120" ]
+
 type config = {
-  socket : string;
+  listen : string list; [@default default_listen]
+  allowed_networks : string list; [@default default_allowed_networks]
   tenants : (string * tenant_config) list;
       [@to_yojson tenants_to_yojson] [@of_yojson tenants_of_yojson]
   rules : rule list;
@@ -267,7 +408,7 @@ let deserialize_push (line : string) : (packed_server_push, string) Result.t =
 
 module Wire = struct
   type command =
-    | Register of { brand : string option [@default None]; socket : string option [@default None]; name : string option [@default None] }
+    | Register of { brand : string option [@default None]; address : string option [@default None]; name : string option [@default None] }
     | Open of { url : string }
     | Open_on of { target : string; url : string }
     | Test of { url : string }
@@ -303,7 +444,7 @@ end
 (* -- Wire type conversions *)
 
 let command_to_wire : type a. a command -> Wire.command = function
-  | Register brand -> Register { brand; socket = None; name = None }
+  | Register brand -> Register { brand; address = None; name = None }
   | Open url -> Open { url }
   | Open_on (target, url) -> Open_on { target; url }
   | Test url -> Test { url }
@@ -499,7 +640,8 @@ let%expect_test "line: round-trip open_on" =
 
 let sample_config =
   {
-    socket = "/run/alloy.sock";
+    listen = [ "127.0.0.1:7120"; "[::1]:7120" ];
+    allowed_networks = default_allowed_networks;
     tenants =
       [
         ( "work",
@@ -520,10 +662,11 @@ let%expect_test "line: round-trip set_config" =
   in
   (match deserialize_server_command line with
    | Ok (Server_command { tenant; command = Set_config cfg }) ->
-     printf "tenant=%s socket=%s rules=%d\n" tenant cfg.socket
+     printf "tenant=%s listen=%s rules=%d\n" tenant
+       (String.concat ~sep:"," cfg.listen)
        (List.length cfg.rules)
    | _ -> print_endline "FAIL");
-  [%expect {| tenant=host socket=/run/alloy.sock rules=1 |}]
+  [%expect {| tenant=host listen=127.0.0.1:7120,[::1]:7120 rules=1 |}]
 
 let sample_rule =
   { pattern = ".*[.]example[.]com"; target = "work"; enabled = true }
@@ -595,9 +738,9 @@ let%expect_test "line: round-trip response config" =
   let line = serialize_response cmd (Ok sample_config) in
   (match deserialize_response cmd line with
    | Ok cfg ->
-     printf "socket=%s rules=%d\n" cfg.socket (List.length cfg.rules)
+     printf "listen=%s rules=%d\n" (String.concat ~sep:"," cfg.listen) (List.length cfg.rules)
    | _ -> print_endline "FAIL");
-  [%expect {| socket=/run/alloy.sock rules=1 |}]
+  [%expect {| listen=127.0.0.1:7120,[::1]:7120 rules=1 |}]
 
 let sample_status =
   { registered_tenants = [ "work"; "personal" ]; uptime_seconds = 3600 }
@@ -676,9 +819,9 @@ let%expect_test "json: round-trip set_config" =
   let json = serialize_command_json (Set_config sample_config) in
   (match deserialize_command_json json with
    | Ok (Command (Set_config cfg)) ->
-     printf "socket=%s\n" cfg.socket
+     printf "listen=%s\n" (String.concat ~sep:"," cfg.listen)
    | _ -> print_endline "FAIL");
-  [%expect {| socket=/run/alloy.sock |}]
+  [%expect {| listen=127.0.0.1:7120,[::1]:7120 |}]
 
 let%expect_test "json: round-trip add_rule" =
   let json = serialize_command_json (Add_rule sample_rule) in
@@ -746,9 +889,9 @@ let%expect_test "json: round-trip response config" =
   let cmd = Get_config in
   let json = serialize_response_json cmd (Ok sample_config) in
   (match deserialize_response_json cmd json with
-   | Ok cfg -> printf "socket=%s\n" cfg.socket
+   | Ok cfg -> printf "listen=%s\n" (String.concat ~sep:"," cfg.listen)
    | _ -> print_endline "FAIL");
-  [%expect {| socket=/run/alloy.sock |}]
+  [%expect {| listen=127.0.0.1:7120,[::1]:7120 |}]
 
 let%expect_test "json: round-trip response status" =
   let cmd = Status in

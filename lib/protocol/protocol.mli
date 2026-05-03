@@ -1,8 +1,24 @@
 (** Multi-tenant URL routing protocol types and serialization. *)
 
-(** {1 Shared paths} *)
+(** {1 Constants} *)
 
-val default_socket_path : unit -> string
+val default_port : int
+
+(** {1 Address parsing} *)
+
+type address = { host : string; port : int }
+
+val parse_address : string -> address
+
+(** {1 CIDR and network filtering} *)
+
+type cidr = { addr : bytes; prefix_len : int }
+
+val ip_to_bytes : string -> bytes option
+val parse_cidr : string -> cidr option
+val ip_in_cidr : string -> cidr -> bool
+val ip_allowed : allowed_networks:cidr list -> string -> bool
+val default_allowed_networks : string list
 
 (** {1 Core data types} *)
 
@@ -31,8 +47,11 @@ type defaults = {
 }
 [@@deriving yojson]
 
+val default_listen : string list
+
 type config = {
-  socket : string;
+  listen : string list;
+  allowed_networks : string list;
   tenants : (string * tenant_config) list;
   rules : rule list;
   defaults : defaults;
@@ -105,7 +124,7 @@ val deserialize_push : string -> (packed_server_push, string) Result.t
 
 module Wire : sig
   type command =
-    | Register of { brand : string option [@default None]; socket : string option [@default None]; name : string option [@default None] }
+    | Register of { brand : string option [@default None]; address : string option [@default None]; name : string option [@default None] }
     | Open of { url : string }
     | Open_on of { target : string; url : string }
     | Test of { url : string }

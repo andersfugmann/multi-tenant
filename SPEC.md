@@ -14,7 +14,7 @@ There are three components:
 
 ## Daemon
 
-The daemon listens on a single Unix socket (default `/run/user/<uid>/alloy.sock`) shared between all tenants (bind-mounted into containers). It accepts two kinds of connections:
+The daemon listens on one or more TCP addresses (default `127.0.0.1:7120` and `[::1]:7120`). Connections from remote tenants (e.g. containers) are allowed by configuring `allowed_networks`. It accepts two kinds of connections:
 
 ### Registered connections
 
@@ -49,7 +49,7 @@ Rules are regex patterns matched against the full URL, evaluated top-to-bottom. 
 
 ## Protocol
 
-The protocol is line-based (one message per line, newline-terminated) over a Unix socket.
+The protocol is line-based (one message per line, newline-terminated) over TCP.
 
 ### Commands (client → daemon)
 
@@ -159,7 +159,8 @@ Clicking the extension icon shows:
 
 The daemon reads its configuration from a JSON file. The configuration contains:
 
-- **socket** — path to the Unix socket (defaults to `/run/user/<uid>/alloy.sock`)
+- **listen** — list of TCP addresses to listen on (default `["127.0.0.1:7120", "[::1]:7120"]`)
+- **allowed_networks** — CIDR list of networks allowed to connect (default `["127.0.0.0/8", "::1/128"]`)
 - **tenants** — a map from hostname to tenant settings (browser command, badge label, badge color, browser brand)
 - **rules** — an ordered list of routing rules (regex pattern, target tenant, enabled flag)
 - **defaults** — unmatched behavior, notification settings, cooldown duration, browser launch timeout

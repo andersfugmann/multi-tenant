@@ -7,7 +7,8 @@ open Js_of_ocaml
 let config : Protocol.config ref =
   ref
     Protocol.{
-      socket = "";
+      listen = default_listen;
+      allowed_networks = default_allowed_networks;
       tenants = [];
       rules = [];
       defaults =

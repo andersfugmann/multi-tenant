@@ -20,8 +20,8 @@ graph TB
         B_BRIDGE["alloy"] <-->|"Native messaging<br/>(JSON)"| B_EXT["Browser Extension"]
     end
 
-    A_BRIDGE <-->|"Unix socket<br/>(line protocol)"| DAEMON
-    DAEMON <-->|"Unix socket<br/>(line protocol)"| B_BRIDGE
+    A_BRIDGE <-->|"TCP<br/>(line protocol)"| DAEMON
+    DAEMON <-->|"TCP<br/>(line protocol)"| B_BRIDGE
 ```
 
 ```mermaid
@@ -78,13 +78,15 @@ a signed `.crx` that
 on next browser launch, and a `.desktop` entry for use as the default URL
 handler.
 
-The daemon's socket must be accessible from each tenant. For containers,
-bind-mount the user's runtime directory entry:
+The daemon must be reachable from each tenant over TCP. For containers,
+ensure the container's network can reach the host on the configured port
+(default 7120), or add the container's subnet to `allowed_networks`:
 
-```ini
-# /etc/systemd/nspawn/<container>.nspawn
-[Files]
-Bind=/run/user/1000/alloy.sock
+```json
+{
+  "listen": ["0.0.0.0:7120", "[::]:7120"],
+  "allowed_networks": ["127.0.0.0/8", "::1/128", "10.0.0.0/8"]
+}
 ```
 
 ## Configuration
@@ -94,7 +96,8 @@ first argument). See [`config.example.json`](config.example.json).
 
 ```json
 {
-  "socket": "/run/user/1000/alloy.sock",
+  "listen": ["127.0.0.1:7120", "[::1]:7120"],
+  "allowed_networks": ["127.0.0.0/8", "::1/128"],
   "tenants": {
     "host-machine": { "browser_cmd": "chromium", "label": "Host", "color": "#4285F4" },
     "work-container": { "browser_cmd": "machinectl shell work -- chromium", "label": "Work", "color": "#EA4335" }
@@ -112,6 +115,8 @@ first argument). See [`config.example.json`](config.example.json).
 
 | Field | Description |
 |-------|-------------|
+| `listen` | List of `host:port` addresses to listen on (default `["127.0.0.1:7120", "[::1]:7120"]`). |
+| `allowed_networks` | CIDR list of networks allowed to connect (default loopback only). |
 | `tenants` | Hostname → `{ browser_cmd, label, color, brand? }`. Keys must match actual hostnames. `brand` is optional and auto-populated on registration. |
 | `rules` | Regex patterns, evaluated top-to-bottom. First match wins. |
 | `defaults.unmatched` | `"local"` or a tenant hostname for unmatched URLs. |
@@ -138,8 +143,8 @@ alloy update-rule <index> '<json>' # Update rule
 alloy delete-rule <index>          # Delete rule
 ```
 
-Socket path defaults to `/run/user/<uid>/alloy.sock` (override with
-`--socket`/`-s`).
+Address defaults to `127.0.0.1:7120` (override with
+`--address`/`-a`).
 
 To set as the default URL handler:
 
