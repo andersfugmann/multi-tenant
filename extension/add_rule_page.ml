@@ -17,8 +17,12 @@ let () =
     let origin = Page_util.url_origin url in
     (match origin with
      | Some o ->
-       pattern_input##.value :=
-         Js.string (Page_util.escape_regexp o ^ "/.*")
+       let pattern =
+         Page_util.escape_regexp o ^ "/.*"
+         |> String.substr_replace_first ~pattern:"https[:]" ~with_:"https?[:]"
+         |> String.substr_replace_first ~pattern:"http[:]" ~with_:"https?[:]"
+       in
+       pattern_input##.value := Js.string pattern
      | None -> ())
 
 (* -- Fetch tenants from config -- *)
