@@ -31,9 +31,15 @@ type starting_tenant = {
   pending : pending_delivery list;
 }
 
+type compiled_rule = {
+  rule : Protocol.rule;
+  regex : Re.re;
+}
+
 type state = {
   config : Protocol.config;
   config_path : string;
+  compiled_rules : compiled_rule list;
   registry : string Eio.Stream.t Map.M(String).t;
   starting : (string * starting_tenant) list;
   cooldowns : cooldown_entry list;
@@ -129,21 +135,24 @@ let compile_regex pattern =
   | exception exn ->
     Error (Printf.sprintf "invalid regex '%s': %s" pattern (Exn.to_string exn))
 
-let evaluate_rules rules url default =
-  rules
-  |> List.mapi ~f:(fun i rule -> (i, rule))
-  |> List.find_map ~f:(fun (i, (rule : Protocol.rule)) ->
-         match rule.enabled with
+let compile_rule (rule : Protocol.rule) =
+  compile_regex rule.pattern
+  |> Result.map ~f:(fun regex -> { rule; regex })
+
+let compile_rules rules =
+  List.map rules ~f:compile_rule
+  |> Result.all
+
+let evaluate_rules compiled_rules url default =
+  compiled_rules
+  |> List.mapi ~f:(fun i cr -> (i, cr))
+  |> List.find_map ~f:(fun (i, cr) ->
+         match cr.rule.enabled with
          | false -> None
          | true ->
-           (match compile_regex rule.pattern with
-            | Error msg ->
-              printf "[url-router] rule %d: %s\n%!" i msg;
-              None
-            | Ok regex ->
-              (match Re.execp regex url with
-               | true -> Some (rule.target, Some i)
-               | false -> None)))
+           (match Re.execp cr.regex url with
+            | true -> Some (cr.rule.target, Some i)
+            | false -> None))
   |> function
   | Some (target, idx) -> (target, idx)
   | None -> (default, None)
@@ -220,7 +229,7 @@ let deliver_url state target url ~sw ~clock ~inbox =
 
 let handle_open state tenant url ~sw ~clock ~inbox =
   let target, _idx =
-    evaluate_rules state.config.rules url state.config.defaults.unmatched
+    evaluate_rules state.compiled_rules url state.config.defaults.unmatched
   in
   let now = Unix.gettimeofday () in
   let cooldown_key = cooldown_key tenant url in
@@ -247,7 +256,7 @@ let handle_open_on state target url ~sw ~clock ~inbox =
 
 let handle_test state url =
   let target, idx =
-    evaluate_rules state.config.rules url state.config.defaults.unmatched
+    evaluate_rules state.compiled_rules url state.config.defaults.unmatched
   in
   match idx with
   | Some i -> (state, Ok (Protocol.Match { tenant = target; rule_index = i }))
@@ -260,20 +269,24 @@ let handle_status state =
   in
   (state, Ok { Protocol.registered_tenants = tenants; uptime_seconds = uptime })
 
-let handle_set_config state cfg =
-  let state = { state with config = cfg } in
-  (try
-     save_config_to_path state.config_path cfg;
-     (state, Ok ())
-   with exn ->
-     (state, Error (Printf.sprintf "failed to save config: %s" (Exn.to_string exn))))
+let handle_set_config state (cfg : Protocol.config) =
+  match compile_rules cfg.rules with
+  | Error msg -> (state, Error (Printf.sprintf "invalid rules: %s" msg))
+  | Ok compiled_rules ->
+    let state = { state with config = cfg; compiled_rules } in
+    (try
+       save_config_to_path state.config_path cfg;
+       (state, Ok ())
+     with exn ->
+       (state, Error (Printf.sprintf "failed to save config: %s" (Exn.to_string exn))))
 
 let handle_add_rule state (rule : Protocol.rule) =
-  match compile_regex rule.pattern with
+  match compile_rule rule with
   | Error msg -> (state, Error msg)
-  | Ok _ ->
+  | Ok compiled ->
     let config = { state.config with rules = state.config.rules @ [ rule ] } in
-    let state = { state with config } in
+    let compiled_rules = state.compiled_rules @ [ compiled ] in
+    let state = { state with config; compiled_rules } in
     (try
        save_config_to_path state.config_path config;
        (state, Ok ())
@@ -281,9 +294,9 @@ let handle_add_rule state (rule : Protocol.rule) =
        (state, Error (Printf.sprintf "failed to save config: %s" (Exn.to_string exn))))
 
 let handle_update_rule state idx (rule : Protocol.rule) =
-  match compile_regex rule.pattern with
+  match compile_rule rule with
   | Error msg -> (state, Error msg)
-  | Ok _ ->
+  | Ok compiled ->
     let config = state.config in
     let len = List.length config.rules in
     (match idx >= 0 && idx < len with
@@ -294,8 +307,12 @@ let handle_update_rule state idx (rule : Protocol.rule) =
          List.mapi config.rules ~f:(fun i r ->
              match Int.equal i idx with true -> rule | false -> r)
        in
+       let compiled_rules =
+         List.mapi state.compiled_rules ~f:(fun i cr ->
+             match Int.equal i idx with true -> compiled | false -> cr)
+       in
        let config = { config with rules = new_rules } in
-       let state = { state with config } in
+       let state = { state with config; compiled_rules } in
        (try
           save_config_to_path state.config_path config;
           (state, Ok ())
@@ -312,8 +329,11 @@ let handle_delete_rule state idx =
     let new_rules =
       List.filteri config.rules ~f:(fun i _ -> not (Int.equal i idx))
     in
+    let compiled_rules =
+      List.filteri state.compiled_rules ~f:(fun i _ -> not (Int.equal i idx))
+    in
     let config = { config with rules = new_rules } in
-    let state = { state with config } in
+    let state = { state with config; compiled_rules } in
     (try
        save_config_to_path state.config_path config;
        (state, Ok ())
@@ -449,9 +469,14 @@ let rec coordinator_loop state inbox ~sw ~clock =
       let registry = Map.remove state.registry tenant in
       printf "[url-router] tenant %s unregistered\n%!" tenant;
       { state with registry }
-    | Update_config config ->
-      printf "[url-router] config reloaded from disk\n%!";
-      { state with config }
+    | Update_config new_config ->
+      (match compile_rules new_config.rules with
+       | Ok compiled_rules ->
+         printf "[url-router] config reloaded from disk\n%!";
+         { state with config = new_config; compiled_rules }
+       | Error msg ->
+         printf "[url-router] config reload rejected: invalid rules: %s\n%!" msg;
+         state)
     | Launch_timeout { tenant } ->
       (match List.Assoc.find state.starting ~equal:String.equal tenant with
        | None -> state
@@ -544,10 +569,18 @@ let () =
       printf "[url-router] fatal: %s\n%!" msg;
       Stdlib.exit 1
   in
+  let compiled_rules =
+    match compile_rules config.rules with
+    | Ok cr -> cr
+    | Error msg ->
+      printf "[url-router] fatal: invalid rules in config: %s\n%!" msg;
+      Stdlib.exit 1
+  in
   let initial_state =
     {
       config;
       config_path;
+      compiled_rules;
       registry = Map.empty (module String);
       starting = [];
       cooldowns = [];
