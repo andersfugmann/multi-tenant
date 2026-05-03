@@ -145,17 +145,11 @@ let connect_with_settings (port : native_port) (tenant_name : string) (daemon_ho
     Register { brand; address; name }
   in
   let json = Protocol.Wire.command_to_yojson register_wire in
-  let state = send_to_bridge state json (fun wire_resp ->
+  send_to_bridge state json (fun wire_resp ->
     match wire_resp with
     | Protocol.Wire.Ok_registered { tenant_id } ->
       push (Self_registered { tenant_id })
-    | _ -> ()) in
-  send_command state (Command Get_config) (fun wire_resp ->
-      match Protocol.response_of_wire Get_config wire_resp with
-      | Ok cfg ->
-        push (Refresh_menus { tenants = List.map cfg.tenants ~f:(fun (id, tc) -> (id, tc.Protocol.label, false)) })
-      | Error msg ->
-        log (Printf.sprintf "Config fetch for menus failed: %s" msg))
+    | _ -> log "Unexpected response for Register command")
 
 let connect (_state : state) : state =
   match
@@ -189,6 +183,16 @@ let connect (_state : state) : state =
 
 (* -- Event handlers (pure state transformers) *)
 
+let response_type_name (resp : Protocol.Wire.response) : string =
+  match resp with
+  | Ok_registered _ -> "Ok_registered"
+  | Ok_route _ -> "Ok_route"
+  | Ok_test _ -> "Ok_test"
+  | Ok_config _ -> "Ok_config"
+  | Ok_status _ -> "Ok_status"
+  | Ok_unit -> "Ok_unit"
+  | Err _ -> "Err"
+
 let handle_bridge_message (state : state) (raw : string) : state =
   match json_of_string raw with
   | Error msg ->
@@ -197,6 +201,8 @@ let handle_bridge_message (state : state) (raw : string) : state =
   | Ok json ->
     (match Protocol.bridge_message_of_yojson json with
      | Ok (Protocol.Wire.Response wire_resp) ->
+       log (Printf.sprintf "Bridge response: %s (pending callbacks: %d)"
+         (response_type_name wire_resp) (List.length state.pending_callbacks));
        (match state.pending_callbacks with
         | [] ->
           log "Received response with no pending callback";
