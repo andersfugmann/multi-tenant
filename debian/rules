@@ -24,45 +24,45 @@ override_dh_auto_test:
 
 override_dh_auto_install:
 	install -D -m 755 _build/default/bin/server/main.exe \
-		debian/url-router/usr/bin/url-router
-	install -D -m 644 debian/url-router.service \
-		debian/url-router/usr/lib/systemd/user/url-router.service
+		debian/alloyd/usr/bin/alloyd
+	install -D -m 644 debian/alloyd.service \
+		debian/alloyd/usr/lib/systemd/user/alloyd.service
 	install -D -m 755 _build/default/bin/client/main.exe \
-		debian/url-router-client/usr/bin/url-router-client
+		debian/alloy/usr/bin/alloy
 	# Canonical native messaging manifest
-	install -D -m 644 debian/url_router.json \
-		debian/url-router-client/usr/share/url-router/url_router.json
+	install -D -m 644 debian/alloy.json \
+		debian/alloy/usr/share/alloy/alloy.json
 	# Symlink for each browser
-	mkdir -p debian/url-router-client/etc/chromium/native-messaging-hosts
-	ln -sf /usr/share/url-router/url_router.json \
-		debian/url-router-client/etc/chromium/native-messaging-hosts/url_router.json
-	mkdir -p debian/url-router-client/etc/opt/chrome/native-messaging-hosts
-	ln -sf /usr/share/url-router/url_router.json \
-		debian/url-router-client/etc/opt/chrome/native-messaging-hosts/url_router.json
-	mkdir -p debian/url-router-client/etc/opt/edge/native-messaging-hosts
-	ln -sf /usr/share/url-router/url_router.json \
-		debian/url-router-client/etc/opt/edge/native-messaging-hosts/url_router.json
+	mkdir -p debian/alloy/etc/chromium/native-messaging-hosts
+	ln -sf /usr/share/alloy/alloy.json \
+		debian/alloy/etc/chromium/native-messaging-hosts/alloy.json
+	mkdir -p debian/alloy/etc/opt/chrome/native-messaging-hosts
+	ln -sf /usr/share/alloy/alloy.json \
+		debian/alloy/etc/opt/chrome/native-messaging-hosts/alloy.json
+	mkdir -p debian/alloy/etc/opt/edge/native-messaging-hosts
+	ln -sf /usr/share/alloy/alloy.json \
+		debian/alloy/etc/opt/edge/native-messaging-hosts/alloy.json
 	# Canonical extension descriptor
 	install -D -m 644 debian/$(EXT_ID).json \
-		debian/url-router-client/usr/share/url-router/$(EXT_ID).json
+		debian/alloy/usr/share/alloy/$(EXT_ID).json
 	# Symlink for each browser
-	mkdir -p debian/url-router-client/usr/share/chromium/extensions
-	ln -sf /usr/share/url-router/$(EXT_ID).json \
-		debian/url-router-client/usr/share/chromium/extensions/$(EXT_ID).json
-	mkdir -p debian/url-router-client/usr/share/google-chrome/extensions
-	ln -sf /usr/share/url-router/$(EXT_ID).json \
-		debian/url-router-client/usr/share/google-chrome/extensions/$(EXT_ID).json
+	mkdir -p debian/alloy/usr/share/chromium/extensions
+	ln -sf /usr/share/alloy/$(EXT_ID).json \
+		debian/alloy/usr/share/chromium/extensions/$(EXT_ID).json
+	mkdir -p debian/alloy/usr/share/google-chrome/extensions
+	ln -sf /usr/share/alloy/$(EXT_ID).json \
+		debian/alloy/usr/share/google-chrome/extensions/$(EXT_ID).json
 	for variant in msedge msedge-beta msedge-dev msedge-canary; do \
-		mkdir -p debian/url-router-client/opt/microsoft/$$variant/extensions; \
-		ln -sf /usr/share/url-router/$(EXT_ID).json \
-			debian/url-router-client/opt/microsoft/$$variant/extensions/$(EXT_ID).json; \
+		mkdir -p debian/alloy/opt/microsoft/$$variant/extensions; \
+		ln -sf /usr/share/alloy/$(EXT_ID).json \
+			debian/alloy/opt/microsoft/$$variant/extensions/$(EXT_ID).json; \
 	done
 	install -D -m 644 _build/extension.crx \
-		debian/url-router-client/usr/share/url-router/extension.crx
-	install -D -m 644 debian/url-router-client.desktop \
-		debian/url-router-client/usr/share/applications/url-router-client.desktop
+		debian/alloy/usr/share/alloy/extension.crx
+	install -D -m 644 debian/alloy.desktop \
+		debian/alloy/usr/share/applications/alloy.desktop
 	install -D -m 644 config.example.json \
-		debian/url-router/usr/share/doc/url-router/config.example.json
+		debian/alloyd/usr/share/doc/alloyd/config.example.json
 
 override_dh_auto_clean:
 	dune clean

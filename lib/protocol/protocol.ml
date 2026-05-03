@@ -490,7 +490,7 @@ let%expect_test "line: round-trip open_on" =
 
 let sample_config =
   {
-    socket = "/run/url-router.sock";
+    socket = "/run/alloy.sock";
     tenants =
       [
         ( "work",
@@ -514,7 +514,7 @@ let%expect_test "line: round-trip set_config" =
      printf "tenant=%s socket=%s rules=%d\n" tenant cfg.socket
        (List.length cfg.rules)
    | _ -> print_endline "FAIL");
-  [%expect {| tenant=host socket=/run/url-router.sock rules=1 |}]
+  [%expect {| tenant=host socket=/run/alloy.sock rules=1 |}]
 
 let sample_rule =
   { pattern = ".*\\.example\\.com"; target = "work"; enabled = true }
@@ -588,7 +588,7 @@ let%expect_test "line: round-trip response config" =
    | Ok cfg ->
      printf "socket=%s rules=%d\n" cfg.socket (List.length cfg.rules)
    | _ -> print_endline "FAIL");
-  [%expect {| socket=/run/url-router.sock rules=1 |}]
+  [%expect {| socket=/run/alloy.sock rules=1 |}]
 
 let sample_status =
   { registered_tenants = [ "work"; "personal" ]; uptime_seconds = 3600 }
@@ -669,7 +669,7 @@ let%expect_test "json: round-trip set_config" =
    | Ok (Command (Set_config cfg)) ->
      printf "socket=%s\n" cfg.socket
    | _ -> print_endline "FAIL");
-  [%expect {| socket=/run/url-router.sock |}]
+  [%expect {| socket=/run/alloy.sock |}]
 
 let%expect_test "json: round-trip add_rule" =
   let json = serialize_command_json (Add_rule sample_rule) in
@@ -739,7 +739,7 @@ let%expect_test "json: round-trip response config" =
   (match deserialize_response_json cmd json with
    | Ok cfg -> printf "socket=%s\n" cfg.socket
    | _ -> print_endline "FAIL");
-  [%expect {| socket=/run/url-router.sock |}]
+  [%expect {| socket=/run/alloy.sock |}]
 
 let%expect_test "json: round-trip response status" =
   let cmd = Status in

@@ -1,10 +1,10 @@
 [Unit]
-Description=URL Router daemon
+Description=Alloy URL routing daemon
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/url-router
+ExecStart=/usr/bin/alloyd
 Restart=on-failure
 
 [Install]

@@ -47,7 +47,7 @@ let safe_stringify (v : _ Js.t) : string =
 (* ── Console ─────────────────────────────────────────────────────── *)
 
 let log (msg : string) : unit =
-  Console.console##log (Js.string (Printf.sprintf "[url-router] %s" msg))
+  Console.console##log (Js.string (Printf.sprintf "[alloy] %s" msg))
 
 (* ── performance.now() ───────────────────────────────────────────── *)
 

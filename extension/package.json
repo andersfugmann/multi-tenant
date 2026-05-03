@@ -1,5 +1,5 @@
 {
-  "name": "url-router-extension-tests",
+  "name": "alloy-extension-tests",
   "private": true,
   "scripts": {
     "test": "jest"

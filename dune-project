@@ -1,13 +1,13 @@
 (lang dune 3.0)
 
-(name url-router)
+(name alloy)
 
 (generate_opam_files true)
 
 (package
- (name url-router)
+ (name alloy)
  (allow_empty)
- (synopsis "Multi-tenant URL routing system")
+ (synopsis "URL routing across browser profiles")
  (depends
   (ocaml
    (>= 5.0))

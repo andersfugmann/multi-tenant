@@ -1,19 +1,19 @@
-Source: url-router
+Source: alloy
 Section: net
 Priority: optional
 Maintainer: Anders Fugmann <anders@fugmann.net>
 Build-Depends: debhelper-compat (= 13)
 Standards-Version: 4.6.0
 
-Package: url-router
+Package: alloyd
 Architecture: any
 Depends: ${misc:Depends}
-Description: Multi-tenant URL routing daemon
+Description: Alloy URL routing daemon
  Daemon that routes URLs to browser profiles based on tenant rules.
 
-Package: url-router-client
+Package: alloy
 Architecture: any
 Depends: ${misc:Depends}
-Description: URL Router native messaging bridge and browser extension
+Description: Alloy native messaging bridge and browser extension
  Native messaging bridge for Chromium/Edge and browser extension
- for the URL Router daemon.
+ for the Alloy daemon.

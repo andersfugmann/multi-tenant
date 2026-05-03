@@ -1,5 +1,5 @@
 {
-  "socket": "/run/user/1000/url-router.sock",
+  "socket": "/run/user/1000/alloy.sock",
   "tenants": {
     "host-machine": {
       "label": "Host",

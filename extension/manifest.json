@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "URL Router",
-  "version": "2.0.7",
-  "description": "Route URLs between multi-tenant browser profiles",
+  "name": "Alloy",
+  "version": "2.0.8",
+  "description": "Route URLs between browser profiles",
   "permissions": [
     "webNavigation",
     "contextMenus",

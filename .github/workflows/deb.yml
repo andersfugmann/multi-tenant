@@ -39,14 +39,14 @@ jobs:
       - name: Build Debian packages
         run: opam exec -- make deb VERSION=${{ inputs.version }}
 
-      - name: Upload url-router deb
+      - name: Upload alloyd deb
         uses: actions/upload-artifact@v4
         with:
-          name: url-router_${{ inputs.version }}_amd64.deb
-          path: _build/deb/url-router_*.deb
+          name: alloyd_${{ inputs.version }}_amd64.deb
+          path: _build/deb/alloyd_*.deb
 
-      - name: Upload url-router-client deb
+      - name: Upload alloy deb
         uses: actions/upload-artifact@v4
         with:
-          name: url-router-client_${{ inputs.version }}_amd64.deb
-          path: _build/deb/url-router-client_*.deb
+          name: alloy_${{ inputs.version }}_amd64.deb
+          path: _build/deb/alloy_*.deb

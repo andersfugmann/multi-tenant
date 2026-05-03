@@ -140,7 +140,7 @@ let connect_with_settings (port : native_port) (tenant_name : string) (socket_pa
 
 let connect (_state : state) : state =
   match
-    let p = Chrome_api.Runtime.connect_native "url_router" in
+    let p = Chrome_api.Runtime.connect_native "alloy" in
     log "Connected to native messaging host";
     Chrome_api.Port.on_message_json p (fun msg ->
       push (Bridge_message { raw = msg }));
@@ -423,7 +423,7 @@ let register_chrome_listeners () : unit =
 (* -- Initialization *)
 
 let () =
-  log "URL Router extension starting";
+  log "Alloy extension starting";
   register_chrome_listeners ();
   push Connect_requested;
   Lwt.async (fun () -> coordinator initial_state)

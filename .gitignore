@@ -7,6 +7,6 @@ debian/debhelper-build-stamp
 debian/files
 debian/*.substvars
 debian/*.postrm.debhelper
-debian/url-router/
-debian/url-router-client/
+debian/alloyd/
+debian/alloy/
 extension/key.pem

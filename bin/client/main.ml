@@ -4,10 +4,10 @@ open Stdio
 (* -- Socket path *)
 
 let socket_path () =
-  match Sys.getenv "URL_ROUTER_SOCKET" with
+  match Sys.getenv "ALLOY_SOCKET" with
   | Some path -> path
   | None ->
-    "/run/user/" ^ Int.to_string (Unix.getuid ()) ^ "/url-router.sock"
+    "/run/user/" ^ Int.to_string (Unix.getuid ()) ^ "/alloy.sock"
 
 (* -- Hostname detection *)
 
@@ -78,7 +78,7 @@ let parse_cli (argv : string array) : cli_options =
     | [ "register" ] -> Register_stream
     | _ ->
       eprintf
-        "Usage: url-router-client [options] <command> [args]\n\
+        "Usage: alloy [options] <command> [args]\n\
          Options:\n\
         \  --socket <path>   Override socket path\n\
         \  --name <tenant>   Override tenant name\n\

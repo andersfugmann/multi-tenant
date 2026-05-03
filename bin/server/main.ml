@@ -2,20 +2,7 @@ open Base
 open Stdio
 
 let default_socket_path () =
-  "/run/user/" ^ Int.to_string (Unix.getuid ()) ^ "/url-router.sock"
-
-let browser_cmd_of_brand brand =
-  Option.bind brand ~f:(fun raw ->
-    let b = String.lowercase raw in
-    match String.is_substring b ~substring:"edge" with
-    | true -> Some "microsoft-edge"
-    | false ->
-      match String.is_substring b ~substring:"chromium" with
-      | true -> Some "chromium"
-      | false ->
-        match String.is_substring b ~substring:"chrome" with
-        | true -> Some "chrome"
-        | false -> None)
+  "/run/user/" ^ Int.to_string (Unix.getuid ()) ^ "/alloy.sock"
 
 (* -- State *)
 
@@ -73,6 +60,14 @@ let default_config () : Protocol.config =
 
 (* -- Config loading / saving *)
 
+let browser_cmd_of_brand brand =
+  Option.bind brand ~f:(fun raw ->
+      match String.lowercase raw with
+      | b when String.is_substring b ~substring:"edge" -> Some "microsoft-edge"
+      | b when String.is_substring b ~substring:"chromium" -> Some "chromium"
+      | b when String.is_substring b ~substring:"chrome" -> Some "chrome"
+      | _ -> None)
+
 let rec mkdir_p path =
   match Stdlib.Sys.file_exists path with
   | true -> ()
@@ -94,11 +89,11 @@ let load_config path =
         Protocol.config_of_yojson json)
   | false ->
     let config = default_config () in
-    printf "[url-router] no config found, creating default at %s\n%!" path;
+    printf "[alloy] no config found, creating default at %s\n%!" path;
     (try
        save_config_to_path path config
      with exn ->
-       printf "[url-router] warning: could not write default config: %s\n%!"
+       printf "[alloy] warning: could not write default config: %s\n%!"
          (Exn.to_string exn));
     Ok config
 
@@ -118,19 +113,12 @@ let compile_rules rules =
   List.map rules ~f:compile_rule
   |> Result.all
 
-let evaluate_rules compiled_rules url default =
-  compiled_rules
-  |> List.mapi ~f:(fun i cr -> (i, cr))
-  |> List.find_map ~f:(fun (i, cr) ->
-         match cr.rule.enabled with
-         | false -> None
-         | true ->
-           (match Re.execp cr.regex url with
-            | true -> Some (cr.rule.target, Some i)
-            | false -> None))
-  |> function
-  | Some (target, idx) -> (target, idx)
-  | None -> (default, None)
+let find_matching_rule compiled_rules url =
+  List.find_mapi ~f:(fun i cr ->
+      match cr.rule.enabled && Re.execp cr.regex url with
+      | true -> Some (cr.rule.target, i)
+      | false -> None
+    ) compiled_rules
 
 (* -- Cooldown *)
 
@@ -156,7 +144,7 @@ let launch_browser cmd =
   let args = String.split ~on:' ' cmd |> Array.of_list in
   let pid = Unix.create_process args.(0) args dev_null dev_null dev_null in
   Unix.close dev_null;
-  printf "[url-router] launched browser (pid %d): %s\n%!" pid cmd
+  printf "[alloy] launched browser (pid %d): %s\n%!" pid cmd
 
 (* -- Deliver URL to tenant (idempotent, may defer) *)
 
@@ -171,13 +159,13 @@ let deliver_url state target url ~sw ~clock ~inbox =
     | Some sentinel ->
       (match List.exists sentinel.pending ~f:(fun pd -> String.equal pd.url url) with
        | true ->
-         printf "[url-router] URL already queued for starting tenant %s: %s\n%!" target url;
+         printf "[alloy] URL already queued for starting tenant %s: %s\n%!" target url;
          (state, Eio.Promise.create_resolved (Ok (Protocol.Remote target)))
        | false ->
          let (promise, resolver) = Eio.Promise.create () in
          let pending = { url; target; reply = resolver } :: sentinel.pending in
          let starting = List.Assoc.add state.starting ~equal:String.equal target { pending } in
-         printf "[url-router] queued URL for starting tenant %s: %s\n%!" target url;
+         printf "[alloy] queued URL for starting tenant %s: %s\n%!" target url;
          ({ state with starting }, promise))
     | None ->
       let browser_cmd =
@@ -197,14 +185,14 @@ let deliver_url state target url ~sw ~clock ~inbox =
          Eio.Fiber.fork ~sw (fun () ->
            Eio.Time.sleep clock timeout;
            Eio.Stream.add inbox (Launch_timeout { tenant = target }));
-         printf "[url-router] starting tenant %s (timeout %.0fs)\n%!" target timeout;
+         printf "[alloy] starting tenant %s (timeout %.0fs)\n%!" target timeout;
          ({ state with starting }, promise))
 
 (* -- Command handlers *)
 
 let handle_open state tenant url ~sw ~clock ~inbox =
-  let target, _idx =
-    evaluate_rules state.compiled_rules url state.config.defaults.unmatched
+  let target, _ =
+    Option.value ~default:(state.config.defaults.unmatched, 0) (find_matching_rule state.compiled_rules url)
   in
   let now = Unix.gettimeofday () in
   let cooldown_key = cooldown_key tenant url in
@@ -230,12 +218,12 @@ let handle_open_on state target url ~sw ~clock ~inbox =
   deliver_url state target url ~sw ~clock ~inbox
 
 let handle_test state url =
-  let target, idx =
-    evaluate_rules state.compiled_rules url state.config.defaults.unmatched
+  let result =
+    match find_matching_rule state.compiled_rules url with
+    | Some (target, idx) -> Protocol.Match { tenant = target; rule_index = idx }
+    | None -> Protocol.No_match { default_tenant = state.config.defaults.unmatched }
   in
-  match idx with
-  | Some i -> (state, Ok (Protocol.Match { tenant = target; rule_index = i }))
-  | None -> (state, Ok (Protocol.No_match { default_tenant = target }))
+  (state, Ok result)
 
 let handle_status state =
   let tenants = Map.keys state.registry in
@@ -318,7 +306,7 @@ let handle_delete_rule state idx =
 (* -- Command dispatch *)
 
 let resolve_reply reply tenant line response_line =
-  printf "[url-router] req[%s]: %s\n[url-router] res[%s]: %s\n%!" tenant line tenant response_line;
+  printf "[alloy] req[%s]: %s\n[alloy] res[%s]: %s\n%!" tenant line tenant response_line;
   Eio.Promise.resolve reply response_line
 
 let dispatch_command :
@@ -381,28 +369,26 @@ let dispatch_line state line ~reply ~sw ~clock ~inbox =
   match Protocol.deserialize_server_command line with
   | Error msg ->
     let resp = Printf.sprintf "ERR %s" msg in
-    printf "[url-router] req: %s\n[url-router] res: %s\n%!" line resp;
+    printf "[alloy] req: %s\n[alloy] res: %s\n%!" line resp;
     Eio.Promise.resolve reply resp;
     state
   | Ok (Server_command { tenant; command }) ->
     dispatch_command state tenant command ~reply ~line ~sw ~clock ~inbox
 
 let rec coordinator_loop state inbox ~sw ~clock =
-  let msg = Eio.Stream.take inbox in
-  let state =
-    match msg with
+  let state = match Eio.Stream.take inbox with
     | Dispatch { line; reply } ->
       dispatch_line state line ~reply ~sw ~clock ~inbox
     | Register_tenant { tenant; brand; push_stream; reply } ->
       (match Map.mem state.registry tenant with
        | true ->
          Eio.Promise.resolve reply (Error "tenant already registered");
-         printf "[url-router] tenant %s register rejected (already registered)\n%!" tenant;
+         printf "[alloy] tenant %s register rejected (already registered)\n%!" tenant;
          state
        | false ->
          let registry = Map.set state.registry ~key:tenant ~data:push_stream in
          Eio.Promise.resolve reply (Ok ());
-         printf "[url-router] tenant %s registered (brand=%s)\n%!" tenant
+         printf "[alloy] tenant %s registered (brand=%s)\n%!" tenant
            (Option.value brand ~default:"(none)");
          let state = { state with registry } in
          (* Flush pending deliveries if tenant was starting *)
@@ -414,7 +400,7 @@ let rec coordinator_loop state inbox ~sw ~clock =
                let push_line = Protocol.serialize_push (Navigate pd.url) in
                Eio.Stream.add push_stream push_line;
                Eio.Promise.resolve pd.reply (Ok (Protocol.Remote tenant));
-               printf "[url-router] delivered pending URL to %s: %s\n%!" tenant pd.url);
+               printf "[alloy] delivered pending URL to %s: %s\n%!" tenant pd.url);
              let starting = List.Assoc.remove state.starting ~equal:String.equal tenant in
              { state with starting }
          in
@@ -434,7 +420,7 @@ let rec coordinator_loop state inbox ~sw ~clock =
              let new_tenant : Protocol.tenant_config =
                { browser_cmd = suggested_cmd; label = tenant; color = "#808080"; brand }
              in
-             printf "[url-router] auto-added tenant %s to config\n%!" tenant;
+             printf "[alloy] auto-added tenant %s to config\n%!" tenant;
              state.config.tenants @ [ (tenant, new_tenant) ]
          in
          let config = { state.config with tenants } in
@@ -442,7 +428,7 @@ let rec coordinator_loop state inbox ~sw ~clock =
          { state with config })
     | Unregister_tenant { tenant } ->
       let registry = Map.remove state.registry tenant in
-      printf "[url-router] tenant %s unregistered\n%!" tenant;
+      printf "[alloy] tenant %s unregistered\n%!" tenant;
       { state with registry }
     | Launch_timeout { tenant } ->
       (match List.Assoc.find state.starting ~equal:String.equal tenant with
@@ -451,9 +437,9 @@ let rec coordinator_loop state inbox ~sw ~clock =
          List.iter sentinel.pending ~f:(fun pd ->
            let msg = Printf.sprintf "tenant %s failed to start within timeout" tenant in
            Eio.Promise.resolve pd.reply (Error msg);
-           printf "[url-router] timeout: failed to deliver URL to %s: %s\n%!" tenant pd.url);
+           printf "[alloy] timeout: failed to deliver URL to %s: %s\n%!" tenant pd.url);
          let starting = List.Assoc.remove state.starting ~equal:String.equal tenant in
-         printf "[url-router] tenant %s start timed out\n%!" tenant;
+         printf "[alloy] tenant %s start timed out\n%!" tenant;
          { state with starting })
   in
   coordinator_loop state inbox ~sw ~clock
@@ -498,14 +484,14 @@ let handle_connection inbox flow =
   match Eio.Buf_read.line reader with
   | exception (End_of_file | Eio.Io _) -> ()
   | line ->
-    printf "[url-router] req: %s\n%!" line;
+    printf "[alloy] req: %s\n%!" line;
     (match Protocol.deserialize_server_command line with
      | Error msg ->
        let resp = Printf.sprintf "ERR %s" msg in
-       printf "[url-router] res: %s\n%!" resp;
+       printf "[alloy] res: %s\n%!" resp;
        Eio.Flow.copy_string (resp ^ "\n") flow
      | Ok (Server_command { tenant; command = Register brand }) ->
-       printf "[url-router] res[%s]: registering (brand=%s)\n%!" tenant
+       printf "[alloy] res[%s]: registering (brand=%s)\n%!" tenant
          (Option.value brand ~default:"(none)");
        handle_register inbox ~tenant ~brand flow reader
      | Ok (Server_command _) ->
@@ -527,20 +513,20 @@ let () =
     | true -> argv.(1)
     | false ->
       let home = Sys.getenv_exn "HOME" in
-      home ^ "/.config/url-router/config.json"
+      home ^ "/.config/alloy/config.json"
   in
   let config =
     match load_config config_path with
     | Ok c -> c
     | Error msg ->
-      printf "[url-router] fatal: %s\n%!" msg;
+      printf "[alloy] fatal: %s\n%!" msg;
       Stdlib.exit 1
   in
   let compiled_rules =
     match compile_rules config.rules with
     | Ok cr -> cr
     | Error msg ->
-      printf "[url-router] fatal: invalid rules in config: %s\n%!" msg;
+      printf "[alloy] fatal: invalid rules in config: %s\n%!" msg;
       Stdlib.exit 1
   in
   let initial_state =
@@ -561,14 +547,14 @@ let () =
   let listening =
     Eio.Net.listen ~sw ~backlog:128 net (`Unix socket_path)
   in
-  printf "[url-router] listening on %s\n%!" socket_path;
+  printf "[alloy] listening on %s\n%!" socket_path;
   Eio.Fiber.all [
     (fun () -> coordinator_loop initial_state inbox ~sw ~clock);
     (fun () ->
       let rec accept_loop () =
         Eio.Net.accept_fork ~sw listening
           ~on_error:(fun exn ->
-            printf "[url-router] connection error: %s\n%!"
+            printf "[alloy] connection error: %s\n%!"
               (Exn.to_string exn))
           (fun flow _addr -> handle_connection inbox flow);
         accept_loop ()

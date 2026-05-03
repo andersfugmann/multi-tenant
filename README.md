@@ -1,23 +1,23 @@
-# URL Router
+# Alloy
 
-Multi-tenant URL routing for Linux desktops. A daemon on the host routes
-URLs between isolated browser instances in different tenants (host or
-systemd-nspawn containers), identified by hostname.
+URL routing for Linux desktops. A daemon on the host routes URLs between
+isolated browser instances in different tenants (host or systemd-nspawn
+containers), identified by hostname.
 
 ## How It Works
 
 ```mermaid
 graph TB
     subgraph "Tenant A"
-        A_EXT["Browser Extension"] <-->|"Native messaging<br/>(JSON)"| A_BRIDGE["url-router-client"]
+        A_EXT["Browser Extension"] <-->|"Native messaging<br/>(JSON)"| A_BRIDGE["alloy"]
     end
 
     subgraph "Host"
-        DAEMON["url-router daemon<br/>─────────────────<br/>Rule engine<br/>Tenant registry<br/>Cooldown map"]
+        DAEMON["alloyd<br/>─────────────────<br/>Rule engine<br/>Tenant registry<br/>Cooldown map"]
     end
 
     subgraph "Tenant B"
-        B_BRIDGE["url-router-client"] <-->|"Native messaging<br/>(JSON)"| B_EXT["Browser Extension"]
+        B_BRIDGE["alloy"] <-->|"Native messaging<br/>(JSON)"| B_EXT["Browser Extension"]
     end
 
     A_BRIDGE <-->|"Unix socket<br/>(line protocol)"| DAEMON
@@ -28,7 +28,7 @@ graph TB
 sequenceDiagram
     participant ExtA as Extension (Tenant A)
     participant BridgeA as Bridge (Tenant A)
-    participant Daemon as url-router (Host)
+    participant Daemon as alloyd (Host)
     participant BridgeB as Bridge (Tenant B)
     participant ExtB as Extension (Tenant B)
 
@@ -62,14 +62,14 @@ Two `.deb` packages are provided via the
 ### Host
 
 ```bash
-sudo dpkg -i url-router_<version>_amd64.deb
-systemctl --user enable --now url-router
+sudo dpkg -i alloyd_<version>_amd64.deb
+systemctl --user enable --now alloyd
 ```
 
 ### Each Tenant / Container
 
 ```bash
-sudo dpkg -i url-router-client_<version>_amd64.deb
+sudo dpkg -i alloy_<version>_amd64.deb
 ```
 
 Installs the bridge/CLI, native messaging manifests (Chromium and Edge),
@@ -84,18 +84,17 @@ bind-mount the user's runtime directory entry:
 ```ini
 # /etc/systemd/nspawn/<container>.nspawn
 [Files]
-Bind=/run/user/1000/url-router.sock
+Bind=/run/user/1000/alloy.sock
 ```
 
 ## Configuration
 
-The daemon reads `~/.config/url-router/config.json` (or a path given as
-its first argument) and reloads on changes. See
-[`config.example.json`](config.example.json).
+The daemon reads `~/.config/alloy/config.json` (or a path given as its
+first argument). See [`config.example.json`](config.example.json).
 
 ```json
 {
-  "socket": "/run/user/1000/url-router.sock",
+  "socket": "/run/user/1000/alloy.sock",
   "tenants": {
     "host-machine": { "browser_cmd": "chromium", "label": "Host", "color": "#4285F4" },
     "work-container": { "browser_cmd": "machinectl shell work -- chromium", "label": "Work", "color": "#EA4335" }
@@ -119,34 +118,33 @@ its first argument) and reloads on changes. See
 | `defaults.cooldown_seconds` | Suppress repeated (tenant, URL) routing within this window. |
 | `defaults.browser_launch_timeout` | Seconds to wait for browser registration after `browser_cmd`. |
 
-Configuration can also be modified via the extension context menu, the
+Configuration can also be modified via the extension context menu or the
 CLI (`get-config`, `set-config`, `add-rule`, `update-rule`,
-`delete-rule`), or by editing the JSON file directly (the daemon picks
-up changes automatically).
+`delete-rule`).
 
 ## Usage
 
 ### CLI
 
 ```bash
-url-router-client open <url>                   # Route via rules
-url-router-client open-on <tenant> <url>       # Route to specific tenant
-url-router-client test <url>                   # Dry-run rule evaluation
-url-router-client status                       # Registered tenants, uptime
-url-router-client get-config                   # Print config as JSON
-url-router-client set-config <json-file>       # Replace config
-url-router-client add-rule '<json>'            # Append rule
-url-router-client update-rule <index> '<json>' # Update rule
-url-router-client delete-rule <index>          # Delete rule
+alloy open <url>                   # Route via rules
+alloy open-on <tenant> <url>       # Route to specific tenant
+alloy test <url>                   # Dry-run rule evaluation
+alloy status                       # Registered tenants, uptime
+alloy get-config                   # Print config as JSON
+alloy set-config <json-file>       # Replace config
+alloy add-rule '<json>'            # Append rule
+alloy update-rule <index> '<json>' # Update rule
+alloy delete-rule <index>          # Delete rule
 ```
 
-Socket path defaults to `/run/user/<uid>/url-router.sock` (override with
-`URL_ROUTER_SOCKET`).
+Socket path defaults to `/run/user/<uid>/alloy.sock` (override with
+`ALLOY_SOCKET`).
 
 To set as the default URL handler:
 
 ```bash
-xdg-settings set default-web-browser url-router-client.desktop
+xdg-settings set default-web-browser alloy.desktop
 ```
 
 ### Browser Extension

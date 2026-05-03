@@ -1,20 +1,20 @@
-# URL Router — System Specification
+# Alloy — System Specification
 
 ## Overview
 
-URL Router is a multi-tenant URL routing system for Linux desktops using systemd-nspawn containers. A single daemon on the host routes URLs between isolated browser instances, each running in a different tenant (host machine or container). Tenants are identified by their hostname.
+Alloy is a URL routing system for Linux desktops using systemd-nspawn containers. A single daemon on the host routes URLs between isolated browser instances, each running in a different tenant (host machine or container). Tenants are identified by their hostname.
 
 ## Components
 
 There are three components:
 
-- **url-router** — the daemon, runs on the host only
-- **url-router-client** — the native messaging bridge and CLI tool, runs in every tenant
+- **alloyd** — the daemon, runs on the host only
+- **alloy** — the native messaging bridge and CLI tool, runs in every tenant
 - **Browser extension** — a Chromium extension, installed in every tenant's browser
 
 ## Daemon
 
-The daemon listens on a single Unix socket (default `/run/user/<uid>/url-router.sock`) shared between all tenants (bind-mounted into containers). It accepts two kinds of connections:
+The daemon listens on a single Unix socket (default `/run/user/<uid>/alloy.sock`) shared between all tenants (bind-mounted into containers). It accepts two kinds of connections:
 
 ### Registered connections
 
@@ -32,7 +32,7 @@ The daemon holds the following state:
 
 - **Tenant registry** — which tenants have active registered connections
 - **Cooldown map** — recently routed (tenant, URL) pairs, used to suppress redirect loops
-- **Configuration** — loaded from a JSON file and reloaded automatically on file changes
+- **Configuration** — loaded from a JSON file
 
 ### Routing logic
 
@@ -93,9 +93,9 @@ All commands may return `ERR <message>` on failure.
 - Tenant IDs are alphanumeric, hyphens, and dots. The synthetic ID `default` is reserved for CLI usage and cannot appear in configuration.
 - JSON payloads in commands are inline to end of line.
 
-## Native Messaging Bridge (url-router-client)
+## Native Messaging Bridge (alloy)
 
-The url-router-client binary operates in two modes:
+The alloy binary operates in two modes:
 
 ### Native messaging mode
 
@@ -159,13 +159,13 @@ Clicking the extension icon shows:
 
 The daemon reads its configuration from a JSON file. The configuration contains:
 
-- **socket** — path to the Unix socket (defaults to `/run/user/<uid>/url-router.sock`)
+- **socket** — path to the Unix socket (defaults to `/run/user/<uid>/alloy.sock`)
 - **tenants** — a map from hostname to tenant settings (browser command, badge label, badge color, browser brand)
 - **rules** — an ordered list of routing rules (regex pattern, target tenant, enabled flag)
 - **defaults** — unmatched behavior, notification settings, cooldown duration, browser launch timeout
 
-The daemon watches the file for changes and reloads automatically. The extension can also replace the configuration via `set-config`.
+The extension can also replace the configuration via `set-config`.
 
-Tenant map keys must match the machine's actual hostname. The `browser_cmd` must be the actual browser binary (not `xdg-open`, which would loop when url-router is the default URL handler). For containers, the command includes `machinectl shell`.
+Tenant map keys must match the machine's actual hostname. The `browser_cmd` must be the actual browser binary (not `xdg-open`, which would loop when alloy is the default URL handler). For containers, the command includes `machinectl shell`.
 
 The `brand` field is optional and is automatically populated by the daemon when a tenant registers. It stores the browser brand reported by the extension (e.g. "Google Chrome", "Microsoft Edge") and is updated on every reconnect.
