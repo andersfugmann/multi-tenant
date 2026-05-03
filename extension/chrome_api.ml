@@ -180,6 +180,10 @@ module Action = struct
   let set_badge_background_color (color : string) : unit =
     call action "setBadgeBackgroundColor"
       [| inject (js_obj [ ("color", inject (Js.string color)) ]) |]
+
+  let set_badge_text_color (color : string) : unit =
+    call action "setBadgeTextColor"
+      [| inject (js_obj [ ("color", inject (Js.string color)) ]) |]
 end
 
 (* ── Windows ─────────────────────────────────────────────────────── *)

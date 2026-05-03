@@ -93,13 +93,13 @@ let is_connected (state : state) : bool =
   Option.is_some state.native_port
 
 let update_badge (connected : bool) : unit =
+  Chrome_api.Action.set_badge_text "●";
+  Chrome_api.Action.set_badge_background_color "transparent";
   match connected with
   | true ->
-    Chrome_api.Action.set_badge_text "●";
-    Chrome_api.Action.set_badge_background_color "#34a853"
+    Chrome_api.Action.set_badge_text_color "#34a853"
   | false ->
-    Chrome_api.Action.set_badge_text "●";
-    Chrome_api.Action.set_badge_background_color "#ea4335"
+    Chrome_api.Action.set_badge_text_color "#ea4335"
 
 let send_to_bridge (state : state) (json : Yojson.Safe.t)
     (on_response : Protocol.Wire.response -> unit) : state =
@@ -133,7 +133,6 @@ let connect_with_settings (port : native_port) (tenant_name : string) (socket_pa
     (Option.value name ~default:"(default)")
     (Option.value socket ~default:"(default)"));
   let state = { native_port = Some port; pending_callbacks = []; tenant_names = []; self_tenant_id = None; debug_logging } in
-  update_badge true;
   (* Build Wire.Register directly to include socket/name overrides *)
   let register_wire : Protocol.Wire.command =
     Register { brand; socket; name }
@@ -489,6 +488,7 @@ let handle_event (state : state) (event : event) : state =
     { state with tenant_names = tenants }
   | Self_registered { tenant_id } ->
     log (Printf.sprintf "Registered as tenant: %s" tenant_id);
+    update_badge true;
     { state with self_tenant_id = Some tenant_id }
   | Delete_rule_at { index } ->
     handle_delete_rule_at state index
