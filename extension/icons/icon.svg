@@ -1,22 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#4285F4"/>
-      <stop offset="100%" stop-color="#1A56DB"/>
-    </linearGradient>
-  </defs>
-  <!-- Rounded square background -->
-  <rect x="4" y="4" width="120" height="120" rx="24" ry="24" fill="url(#bg)"/>
+  <!-- Alembic / chemistry flask icon -->
   <!-- Flask neck -->
-  <rect x="52" y="18" width="24" height="28" rx="4" fill="none" stroke="#fff" stroke-width="6"/>
+  <rect x="50" y="8" width="28" height="32" rx="4" fill="#5f6368"/>
   <!-- Neck rim -->
-  <line x1="46" y1="18" x2="82" y2="18" stroke="#fff" stroke-width="6" stroke-linecap="round"/>
+  <rect x="42" y="4" width="44" height="8" rx="4" fill="#5f6368"/>
   <!-- Flask body (conical) -->
-  <path d="M 52,46 L 26,94 Q 24,102 32,106 L 96,106 Q 104,102 102,94 L 76,46" fill="none" stroke="#fff" stroke-width="6" stroke-linejoin="round"/>
-  <!-- Liquid inside -->
-  <path d="M 34,88 L 94,88 Q 100,98 94,104 L 34,104 Q 28,98 34,88 Z" fill="#A8D8FF" opacity="0.7"/>
+  <path d="M 50,40 L 16,104 Q 12,114 22,118 L 106,118 Q 116,114 112,104 L 78,40 Z" fill="#90caf9" stroke="#5f6368" stroke-width="4" stroke-linejoin="round"/>
+  <!-- Liquid -->
+  <path d="M 28,92 L 100,92 Q 110,108 102,116 L 26,116 Q 18,108 28,92 Z" fill="#ffd54f" opacity="0.85"/>
   <!-- Bubbles -->
-  <circle cx="50" cy="78" r="5" fill="#fff" opacity="0.7"/>
-  <circle cx="70" cy="72" r="4" fill="#fff" opacity="0.5"/>
-  <circle cx="80" cy="82" r="4.5" fill="#fff" opacity="0.6"/>
+  <circle cx="48" cy="82" r="5" fill="#fff" opacity="0.7"/>
+  <circle cx="72" cy="76" r="4" fill="#fff" opacity="0.5"/>
+  <circle cx="82" cy="86" r="4.5" fill="#fff" opacity="0.6"/>
+  <circle cx="58" cy="70" r="3" fill="#fff" opacity="0.4"/>
 </svg>
