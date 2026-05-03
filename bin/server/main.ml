@@ -60,7 +60,6 @@ type coordinator_msg =
       reply : (unit, string) Result.t Eio.Promise.u;
     }
   | Unregister_tenant of { tenant : string }
-  | Update_config of Protocol.config
   | Launch_timeout of { tenant : string }
 
 let default_config () : Protocol.config =
@@ -102,30 +101,6 @@ let load_config path =
        printf "[url-router] warning: could not write default config: %s\n%!"
          (Exn.to_string exn));
     Ok config
-
-let config_mtime path =
-  match Unix.stat path with
-  | stat -> Some stat.Unix.st_mtime
-  | exception Unix.Unix_error _ -> None
-
-(* -- Config file watcher (polling) *)
-
-let config_watcher config_path inbox clock =
-  let rec loop last_mtime =
-    Eio.Time.sleep clock 2.0;
-    let current_mtime = config_mtime config_path in
-    (match Option.equal Float.equal last_mtime current_mtime with
-     | true -> loop last_mtime
-     | false ->
-       (match load_config config_path with
-        | Ok new_config ->
-          Eio.Stream.add inbox (Update_config new_config);
-          printf "[url-router] config reloaded\n%!"
-        | Error msg ->
-          printf "[url-router] config reload failed: %s\n%!" msg);
-       loop current_mtime)
-  in
-  loop (config_mtime config_path)
 
 (* -- Rule evaluation *)
 
@@ -469,14 +444,6 @@ let rec coordinator_loop state inbox ~sw ~clock =
       let registry = Map.remove state.registry tenant in
       printf "[url-router] tenant %s unregistered\n%!" tenant;
       { state with registry }
-    | Update_config new_config ->
-      (match compile_rules new_config.rules with
-       | Ok compiled_rules ->
-         printf "[url-router] config reloaded from disk\n%!";
-         { state with config = new_config; compiled_rules }
-       | Error msg ->
-         printf "[url-router] config reload rejected: invalid rules: %s\n%!" msg;
-         state)
     | Launch_timeout { tenant } ->
       (match List.Assoc.find state.starting ~equal:String.equal tenant with
        | None -> state
@@ -597,7 +564,6 @@ let () =
   printf "[url-router] listening on %s\n%!" socket_path;
   Eio.Fiber.all [
     (fun () -> coordinator_loop initial_state inbox ~sw ~clock);
-    (fun () -> config_watcher config_path inbox clock);
     (fun () ->
       let rec accept_loop () =
         Eio.Net.accept_fork ~sw listening
