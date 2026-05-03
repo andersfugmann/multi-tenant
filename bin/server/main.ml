@@ -167,16 +167,12 @@ let check_and_prune_cooldowns cooldowns ~now ~key =
 
 (* -- Launch browser process (fire-and-forget) *)
 
-let launch_browser ~sw cmd =
+let launch_browser ~sw:_ cmd =
   let dev_null = Unix.openfile "/dev/null" [ Unix.O_RDWR ] 0o000 in
   let args = String.split ~on:' ' cmd |> Array.of_list in
   let pid = Unix.create_process args.(0) args dev_null dev_null dev_null in
   Unix.close dev_null;
-  printf "[url-router] launched browser (pid %d): %s\n%!" pid cmd;
-  Eio.Fiber.fork ~sw (fun () ->
-    let _pid, _status = Eio_unix.run_in_systhread ~label:"waitpid" (fun () ->
-      Unix.waitpid [] pid) in
-    printf "[url-router] browser process %d exited\n%!" pid)
+  printf "[url-router] launched browser (pid %d): %s\n%!" pid cmd
 
 (* -- Deliver URL to tenant (idempotent, may defer) *)
 
@@ -529,6 +525,7 @@ let handle_connection inbox flow =
 (* -- Main *)
 
 let () =
+  Stdlib.Sys.set_signal Stdlib.Sys.sigchld Stdlib.Sys.Signal_ignore;
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
   let net = Eio.Stdenv.net env in
