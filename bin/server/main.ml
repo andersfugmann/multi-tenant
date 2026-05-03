@@ -499,19 +499,14 @@ let handle_connection inbox flow =
 
 (* -- Main *)
 
-let () =
+let default_config_path () =
+  Sys.getenv_exn "HOME" ^ "/.config/alloy/config.json"
+
+let run config_path =
   Stdlib.Sys.set_signal Stdlib.Sys.sigchld Stdlib.Sys.Signal_ignore;
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
   let net = Eio.Stdenv.net env in
-  let config_path =
-    let argv = Sys.get_argv () in
-    match Array.length argv > 1 with
-    | true -> argv.(1)
-    | false ->
-      let home = Sys.getenv_exn "HOME" in
-      home ^ "/.config/alloy/config.json"
-  in
   let config =
     match load_config config_path with
     | Ok c -> c
@@ -558,3 +553,16 @@ let () =
       in
       accept_loop ());
   ]
+
+let () =
+  let open Cmdliner in
+  let config_path =
+    let doc = "Path to configuration file." in
+    Arg.(value & opt string (default_config_path ())
+         & info [ "config"; "c" ] ~docv:"PATH" ~doc)
+  in
+  let cmd =
+    Cmd.v (Cmd.info "alloyd" ~doc:"Alloy URL routing daemon")
+      Term.(const run $ config_path)
+  in
+  Stdlib.exit (Cmd.eval cmd)

@@ -25,77 +25,148 @@ type cli_options = {
   name : string option;
 }
 
-let extract_options (args : string list) : string option * string option * string list =
-  let rec loop sock name acc = function
-    | "--socket" :: v :: rest -> loop (Some v) name acc rest
-    | "--name" :: v :: rest -> loop sock (Some v) acc rest
-    | x :: rest -> loop sock name (x :: acc) rest
-    | [] -> (sock, name, List.rev acc)
-  in
-  loop None None [] args
+let parse_rule_json json_str =
+  match
+    Result.bind (Protocol.parse_json_string json_str) ~f:Protocol.rule_of_yojson
+  with
+  | Ok rule -> rule
+  | Error msg -> failwith (Printf.sprintf "invalid rule JSON: %s" msg)
 
-let parse_cli (argv : string array) : cli_options =
-  let all_args = Array.to_list argv |> List.tl_exn in
-  let (socket, name, args) = extract_options all_args in
-  let mode =
-    match args with
-    | [ "--bridge" ] -> Bridge
-    | "open" :: [ url ] -> Cli_command (Command (Open url))
-    | "open-on" :: target :: [ url ] ->
-      Cli_command (Command (Open_on (target, url)))
-    | "test" :: [ url ] -> Cli_command (Command (Test url))
-    | [ "get-config" ] -> Cli_command (Command Get_config)
-    | "set-config" :: [ json_file ] ->
-      let content = In_channel.read_all json_file in
-      (match
-         Result.bind (Protocol.parse_json_string content) ~f:Protocol.config_of_yojson
-       with
-       | Ok cfg -> Cli_command (Command (Set_config cfg))
-       | Error msg -> failwith (Printf.sprintf "invalid config JSON: %s" msg))
-    | "add-rule" :: [ json_str ] ->
-      (match
-         Result.bind (Protocol.parse_json_string json_str) ~f:Protocol.rule_of_yojson
-       with
-       | Ok rule -> Cli_command (Command (Add_rule rule))
-       | Error msg -> failwith (Printf.sprintf "invalid rule JSON: %s" msg))
-    | "update-rule" :: idx_str :: [ json_str ] ->
-      let idx =
-        match Int.of_string_opt idx_str with
-        | Some i -> i
-        | None -> failwith (Printf.sprintf "invalid index: %s" idx_str)
-      in
-      (match
-         Result.bind (Protocol.parse_json_string json_str) ~f:Protocol.rule_of_yojson
-       with
-       | Ok rule -> Cli_command (Command (Update_rule (idx, rule)))
-       | Error msg -> failwith (Printf.sprintf "invalid rule JSON: %s" msg))
-    | "delete-rule" :: [ idx_str ] ->
-      (match Int.of_string_opt idx_str with
-       | Some idx -> Cli_command (Command (Delete_rule idx))
-       | None -> failwith (Printf.sprintf "invalid index: %s" idx_str))
-    | [ "status" ] -> Cli_command (Command Status)
-    | [ "register" ] -> Register_stream
-    | _ ->
-      eprintf
-        "Usage: alloy [options] <command> [args]\n\
-         Options:\n\
-        \  --socket <path>   Override socket path\n\
-        \  --name <tenant>   Override tenant name\n\
-         Commands:\n\
-        \  open <url>\n\
-        \  open-on <target> <url>\n\
-        \  test <url>\n\
-        \  get-config\n\
-        \  set-config <json-file>\n\
-        \  add-rule <json>\n\
-        \  update-rule <index> <json>\n\
-        \  delete-rule <index>\n\
-        \  status\n\
-        \  register\n\
-        \  --bridge\n";
-      Stdlib.exit 1
+let parse_config_file json_file =
+  let content = In_channel.read_all json_file in
+  match
+    Result.bind (Protocol.parse_json_string content) ~f:Protocol.config_of_yojson
+  with
+  | Ok cfg -> cfg
+  | Error msg -> failwith (Printf.sprintf "invalid config JSON: %s" msg)
+
+let parse_index idx_str =
+  match Int.of_string_opt idx_str with
+  | Some i -> i
+  | None -> failwith (Printf.sprintf "invalid index: %s" idx_str)
+
+let cli_term () =
+  let open Cmdliner in
+  let socket_opt =
+    let doc = "Override daemon socket path." in
+    Arg.(value & opt (some string) None
+         & info [ "socket"; "s" ] ~docv:"PATH" ~doc)
   in
-  { mode; socket; name }
+  let name_opt =
+    let doc = "Override tenant name." in
+    Arg.(value & opt (some string) None
+         & info [ "name"; "n" ] ~docv:"TENANT" ~doc)
+  in
+  let make_opts mode socket name = { mode; socket; name } in
+  let bridge_cmd =
+    let doc = "Run as native messaging bridge for the browser extension." in
+    Cmd.v (Cmd.info "bridge" ~doc)
+      Term.(const (make_opts Bridge) $ socket_opt $ name_opt)
+  in
+  let register_cmd =
+    let doc = "Register as a tenant and stream push messages." in
+    Cmd.v (Cmd.info "register" ~doc)
+      Term.(const (make_opts Register_stream) $ socket_opt $ name_opt)
+  in
+  let open_cmd =
+    let doc = "Open a URL via the routing daemon." in
+    let url =
+      Arg.(required & pos 0 (some string) None
+           & info [] ~docv:"URL" ~doc:"URL to open.")
+    in
+    Cmd.v (Cmd.info "open" ~doc)
+      Term.(const (fun url -> make_opts (Cli_command (Command (Open url))))
+            $ url $ socket_opt $ name_opt)
+  in
+  let open_on_cmd =
+    let doc = "Open a URL on a specific tenant." in
+    let target =
+      Arg.(required & pos 0 (some string) None
+           & info [] ~docv:"TARGET" ~doc:"Target tenant.")
+    in
+    let url =
+      Arg.(required & pos 1 (some string) None
+           & info [] ~docv:"URL" ~doc:"URL to open.")
+    in
+    Cmd.v (Cmd.info "open-on" ~doc)
+      Term.(const (fun target url ->
+              make_opts (Cli_command (Command (Open_on (target, url)))))
+            $ target $ url $ socket_opt $ name_opt)
+  in
+  let test_cmd =
+    let doc = "Test which tenant a URL would route to." in
+    let url =
+      Arg.(required & pos 0 (some string) None
+           & info [] ~docv:"URL" ~doc:"URL to test.")
+    in
+    Cmd.v (Cmd.info "test" ~doc)
+      Term.(const (fun url -> make_opts (Cli_command (Command (Test url))))
+            $ url $ socket_opt $ name_opt)
+  in
+  let get_config_cmd =
+    let doc = "Get the current daemon configuration." in
+    Cmd.v (Cmd.info "get-config" ~doc)
+      Term.(const (make_opts (Cli_command (Command Get_config)))
+            $ socket_opt $ name_opt)
+  in
+  let set_config_cmd =
+    let doc = "Set the daemon configuration from a JSON file." in
+    let json_file =
+      Arg.(required & pos 0 (some string) None
+           & info [] ~docv:"FILE" ~doc:"Path to JSON config file.")
+    in
+    Cmd.v (Cmd.info "set-config" ~doc)
+      Term.(const (fun json_file ->
+              make_opts (Cli_command (Command (Set_config (parse_config_file json_file)))))
+            $ json_file $ socket_opt $ name_opt)
+  in
+  let add_rule_cmd =
+    let doc = "Add a routing rule (JSON)." in
+    let json_str =
+      Arg.(required & pos 0 (some string) None
+           & info [] ~docv:"JSON" ~doc:"Rule as JSON string.")
+    in
+    Cmd.v (Cmd.info "add-rule" ~doc)
+      Term.(const (fun json_str ->
+              make_opts (Cli_command (Command (Add_rule (parse_rule_json json_str)))))
+            $ json_str $ socket_opt $ name_opt)
+  in
+  let update_rule_cmd =
+    let doc = "Update a routing rule at the given index." in
+    let idx =
+      Arg.(required & pos 0 (some string) None
+           & info [] ~docv:"INDEX" ~doc:"Rule index (0-based).")
+    in
+    let json_str =
+      Arg.(required & pos 1 (some string) None
+           & info [] ~docv:"JSON" ~doc:"Rule as JSON string.")
+    in
+    Cmd.v (Cmd.info "update-rule" ~doc)
+      Term.(const (fun idx_str json_str ->
+              make_opts (Cli_command (Command (Update_rule (parse_index idx_str, parse_rule_json json_str)))))
+            $ idx $ json_str $ socket_opt $ name_opt)
+  in
+  let delete_rule_cmd =
+    let doc = "Delete a routing rule at the given index." in
+    let idx =
+      Arg.(required & pos 0 (some string) None
+           & info [] ~docv:"INDEX" ~doc:"Rule index (0-based).")
+    in
+    Cmd.v (Cmd.info "delete-rule" ~doc)
+      Term.(const (fun idx_str ->
+              make_opts (Cli_command (Command (Delete_rule (parse_index idx_str)))))
+            $ idx $ socket_opt $ name_opt)
+  in
+  let status_cmd =
+    let doc = "Show daemon status." in
+    Cmd.v (Cmd.info "status" ~doc)
+      Term.(const (make_opts (Cli_command (Command Status)))
+            $ socket_opt $ name_opt)
+  in
+  Cmd.group (Cmd.info "alloy" ~doc:"Alloy URL routing client")
+    [ bridge_cmd; register_cmd; open_cmd; open_on_cmd; test_cmd;
+      get_config_cmd; set_config_cmd; add_rule_cmd; update_rule_cmd;
+      delete_rule_cmd; status_cmd ]
 
 (* Format response as human-readable CLI output *)
 
@@ -349,17 +420,9 @@ let run_bridge env =
 
 (* -- Main *)
 
-let () =
+let run_cli { mode; socket; name } =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
-  let argv = Sys.get_argv () in
-  (* Detect bridge mode: explicit --bridge flag or chrome-extension:// origin arg *)
-  let { mode; socket; name } =
-    match Array.length argv with
-    | 2 when String.is_prefix (Array.get argv 1) ~prefix:"chrome-extension://" ->
-      { mode = Bridge; socket = None; name = None }
-    | _ -> parse_cli argv
-  in
   let resolve_socket () =
     match socket with
     | Some s -> s
@@ -378,3 +441,15 @@ let () =
     let tenant = resolve_tenant "default" in
     let output = send_command_cli ~net ~tenant ~sock_path:(resolve_socket ()) cmd in
     print_endline output
+
+let () =
+  let argv = Sys.get_argv () in
+  (* Chromium launches native messaging hosts with a chrome-extension:// origin arg *)
+  match Array.length argv with
+  | 2 when String.is_prefix (Array.get argv 1) ~prefix:"chrome-extension://" ->
+    run_cli { mode = Bridge; socket = None; name = None }
+  | _ ->
+    (match Cmdliner.Cmd.eval_value (cli_term ()) with
+     | Ok (`Ok opts) -> run_cli opts
+     | Ok `Help | Ok `Version -> ()
+     | Error _ -> Stdlib.exit 1)

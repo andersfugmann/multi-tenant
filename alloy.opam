@@ -17,6 +17,7 @@ depends: [
   "js_of_ocaml-ppx" {>= "5.0"}
   "lwt" {>= "5.0"}
   "lwt_ppx" {>= "5.0"}
+  "cmdliner" {>= "1.0"}
   "ppx_expect" {with-test & >= "v0.17"}
   "ppx_inline_test" {with-test & >= "v0.17"}
   "odoc" {with-doc}

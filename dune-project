@@ -37,6 +37,8 @@
    (>= 5.0))
   (lwt_ppx
    (>= 5.0))
+  (cmdliner
+   (>= 1.0))
   (ppx_expect
    (and
     :with-test
