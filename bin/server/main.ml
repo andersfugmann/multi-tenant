@@ -7,8 +7,9 @@ type cooldown_entry = { key : string; expires : float }
 
 type pending_delivery = {
   url : string;
-  target : string;
+  target : string; (* Not sure what we need this for *)
   reply : (Protocol.route_result, string) Result.t Eio.Promise.u;
+  promise : (Protocol.route_result, string) Result.t Eio.Promise.t;
 }
 
 type starting_tenant = {
@@ -152,38 +153,44 @@ let deliver_url state target url ~sw ~clock ~inbox =
     Eio.Stream.add stream push_line;
     (state, Eio.Promise.create_resolved (Ok (Protocol.Remote target)))
   | None ->
-    match List.Assoc.find state.starting ~equal:String.equal target with
-    | Some sentinel ->
-      (match List.exists sentinel.pending ~f:(fun pd -> String.equal pd.url url) with
-       | true ->
-         printf "[alloy] URL already queued for starting tenant %s: %s\n%!" target url;
-         (state, Eio.Promise.create_resolved (Ok (Protocol.Remote target)))
-       | false ->
-         let (promise, resolver) = Eio.Promise.create () in
-         let pending = { url; target; reply = resolver } :: sentinel.pending in
-         let starting = List.Assoc.add state.starting ~equal:String.equal target { pending } in
-         printf "[alloy] queued URL for starting tenant %s: %s\n%!" target url;
-         ({ state with starting }, promise))
-    | None ->
-      let browser_cmd =
-        List.Assoc.find state.config.tenants ~equal:String.equal target
-        |> Option.bind ~f:(fun (tc : Protocol.tenant_config) -> tc.browser_cmd)
+    let sentinel =
+      match List.Assoc.find state.starting ~equal:String.equal target with
+      | Some sentinel -> Some sentinel
+      | None ->
+        let browser_cmd =
+          List.Assoc.find state.config.tenants ~equal:String.equal target
+          |> Option.bind ~f:(fun (tc : Protocol.tenant_config) -> tc.browser_cmd)
+        in
+        match browser_cmd with
+        | None ->
+          printf "[alloy] tenant %s has no browser command\n%!" target;
+          None
+        | Some cmd ->
+          let timeout = Float.of_int state.config.defaults.browser_launch_timeout in
+          printf "[alloy] starting tenant %s (timeout %.0fs): %s\n%!" target timeout cmd;
+          Eio.Fiber.fork ~sw (fun () ->
+              launch_browser cmd;
+              Eio.Time.sleep clock timeout;
+              Eio.Stream.add inbox (Launch_timeout { tenant = target }));
+          Some { pending = [] }
+    in
+    match sentinel with
+    | Some { pending } ->
+      let pending, promise =
+        match List.find pending ~f:(fun pd -> String.equal pd.url url) with
+        | Some { promise; _ } ->
+          printf "[alloy] URL already queued for starting tenant %s: %s\n%!" target url;
+          pending, promise
+        | None ->
+          let (promise, resolver) = Eio.Promise.create () in
+          let pending = { url; target; reply = resolver; promise } :: pending in
+          pending, promise
       in
-      (match browser_cmd with
-       | None ->
-         let msg = Printf.sprintf "tenant %s not registered" target in
-         (state, Eio.Promise.create_resolved (Error msg))
-       | Some cmd ->
-         let (promise, resolver) = Eio.Promise.create () in
-         let sentinel = { pending = [ { url; target; reply = resolver } ] } in
-         let starting = List.Assoc.add state.starting ~equal:String.equal target sentinel in
-         launch_browser cmd;
-         let timeout = Float.of_int state.config.defaults.browser_launch_timeout in
-         Eio.Fiber.fork ~sw (fun () ->
-           Eio.Time.sleep clock timeout;
-           Eio.Stream.add inbox (Launch_timeout { tenant = target }));
-         printf "[alloy] starting tenant %s (timeout %.0fs)\n%!" target timeout;
-         ({ state with starting }, promise))
+      let starting = List.Assoc.add state.starting ~equal:String.equal target { pending } in
+      { state with starting }, promise
+    | None ->
+      let msg = Printf.sprintf "Unknown tenant %s or no browser command given" target in
+      state, Eio.Promise.create_resolved (Error msg)
 
 (* -- Command handlers *)
 
