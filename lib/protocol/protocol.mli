@@ -92,7 +92,9 @@ type _ command =
 
 (** {1 Server push} *)
 
-type _ server_push = Navigate : url -> url server_push
+type _ server_push =
+  | Navigate : url -> url server_push
+  | Config_updated : (config * string list) -> (config * string list) server_push
 
 type packed_server_push = Push : 'a server_push -> packed_server_push
 
@@ -149,6 +151,7 @@ module Wire : sig
   type push =
     | Navigate of { url : string }
     | Registered of { tenant_id : string }
+    | Config_updated of { config : config; registered_tenants : string list }
   [@@deriving yojson]
 
   type bridge_message =

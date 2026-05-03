@@ -316,6 +316,12 @@ let resolve_reply reply tenant line response_line =
   log "res[%s]: %s" tenant response_line;
   Eio.Promise.resolve reply response_line
 
+let broadcast_config (state : state) : unit =
+  let registered = Map.keys state.registry in
+  let push_line = Protocol.serialize_push (Config_updated (state.config, registered)) in
+  Map.iter state.registry ~f:(fun stream ->
+    Eio.Stream.add stream push_line)
+
 let dispatch_command :
     type a. state -> Protocol.tenant_id -> a Protocol.command ->
     reply:string Eio.Promise.u -> line:string ->
@@ -352,18 +358,22 @@ let dispatch_command :
   | Protocol.Set_config cfg ->
     let (state, resp) = handle_set_config state cfg in
     resolve_reply reply tenant line (Protocol.serialize_response (Set_config cfg) resp);
+    broadcast_config state;
     state
   | Protocol.Add_rule rule ->
     let (state, resp) = handle_add_rule state rule in
     resolve_reply reply tenant line (Protocol.serialize_response (Add_rule rule) resp);
+    broadcast_config state;
     state
   | Protocol.Update_rule (idx, rule) ->
     let (state, resp) = handle_update_rule state idx rule in
     resolve_reply reply tenant line (Protocol.serialize_response (Update_rule (idx, rule)) resp);
+    broadcast_config state;
     state
   | Protocol.Delete_rule idx ->
     let (state, resp) = handle_delete_rule state idx in
     resolve_reply reply tenant line (Protocol.serialize_response (Delete_rule idx) resp);
+    broadcast_config state;
     state
   | Protocol.Status ->
     let (state, resp) = handle_status state in
@@ -433,11 +443,15 @@ let rec coordinator_loop state inbox ~sw ~clock =
          in
          let config = { state.config with tenants } in
          (try save_config_to_path state.config_path config with _ -> ());
-         { state with config })
+         let state = { state with config } in
+         broadcast_config state;
+         state)
     | Unregister_tenant { tenant } ->
       let registry = Map.remove state.registry tenant in
       log "tenant %s unregistered" tenant;
-      { state with registry }
+      let state = { state with registry } in
+      broadcast_config state;
+      state
     | Launch_timeout { tenant } ->
       (match List.Assoc.find state.starting ~equal:String.equal tenant with
        | None -> state

@@ -262,6 +262,9 @@ let run_register ~net ~addr ~tenant =
       (match Protocol.deserialize_push push_line with
        | Ok (Push (Navigate url)) ->
          printf "NAVIGATE %s\n%!" url
+       | Ok (Push (Config_updated (cfg, registered))) ->
+         printf "CONFIG_UPDATED tenants=%d registered=%d\n%!"
+           (List.length cfg.tenants) (List.length registered)
        | Error msg ->
          eprintf "Push parse error: %s\n%!" msg);
       read_loop ()

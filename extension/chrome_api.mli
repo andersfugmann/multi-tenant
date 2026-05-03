@@ -50,6 +50,8 @@ module Context_menus : sig
     parent_id:string ->
     title:string ->
     contexts:string list ->
+    ?enabled:bool ->
+    unit ->
     unit
   val remove_all : (unit -> unit) -> unit
   val on_clicked : (string -> string -> string -> int option -> unit) -> unit

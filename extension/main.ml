@@ -61,14 +61,14 @@ type event =
   | Context_menu of { menu_id : string; link_url : string; page_url : string; tab_id : int option }
   | Popup_query of { json : Yojson.Safe.t; respond : Yojson.Safe.t -> unit }
   | Setup_menus
-  | Refresh_menus of { tenants : string list }
+  | Refresh_menus of { tenants : (string * string * bool) list }
   | Self_registered of { tenant_id : string }
   | Delete_rule_at of { index : int }
 
 type state = {
   native_port : native_port option;
   pending_callbacks : (Protocol.Wire.response -> unit) list;
-  tenant_names : string list;
+  tenant_names : (string * string * bool) list;
   self_tenant_id : string option;
   debug_logging : bool;
 }
@@ -153,7 +153,7 @@ let connect_with_settings (port : native_port) (tenant_name : string) (daemon_ho
   send_command state (Command Get_config) (fun wire_resp ->
       match Protocol.response_of_wire Get_config wire_resp with
       | Ok cfg ->
-        push (Refresh_menus { tenants = List.map cfg.tenants ~f:fst })
+        push (Refresh_menus { tenants = List.map cfg.tenants ~f:(fun (id, tc) -> (id, tc.Protocol.label, false)) })
       | Error msg ->
         log (Printf.sprintf "Config fetch for menus failed: %s" msg))
 
@@ -211,6 +211,14 @@ let handle_bridge_message (state : state) (raw : string) : state =
      | Ok (Protocol.Wire.Push (Protocol.Wire.Registered { tenant_id })) ->
        log (Printf.sprintf "Re-registered as tenant: %s" tenant_id);
        push (Self_registered { tenant_id });
+       state
+     | Ok (Protocol.Wire.Push (Protocol.Wire.Config_updated { config = cfg; registered_tenants })) ->
+       log (Printf.sprintf "Config push: %d tenants, %d registered"
+         (List.length cfg.tenants) (List.length registered_tenants));
+       let registered_set = Set.of_list (module String) registered_tenants in
+       let tenants = List.map cfg.tenants ~f:(fun (id, tc) ->
+         (id, tc.Protocol.label, Set.mem registered_set id)) in
+       push (Refresh_menus { tenants });
        state
      | Error msg ->
        log (Printf.sprintf "Failed to parse bridge message: %s" msg);
@@ -442,7 +450,6 @@ let handle_popup_query (state : state) (json : Yojson.Safe.t)
           send_command state (Command (Set_config cfg)) (fun wire_resp ->
               match Protocol.response_of_wire (Set_config cfg) wire_resp with
               | Ok () ->
-                push (Refresh_menus { tenants = List.map cfg.tenants ~f:fst });
                 respond (`Assoc [ ("ok", `Bool true) ])
               | Error msg ->
                 respond (`Assoc [ ("error", `String msg) ]))))
@@ -454,17 +461,25 @@ let handle_popup_query (state : state) (json : Yojson.Safe.t)
     respond (`Assoc [ ("error", `String "invalid message") ]);
     state
 
-let setup_context_menus (tenants : string list) : unit =
+let setup_context_menus (tenants : (string * string * bool) list) (self_id : string option) : unit =
   remove_all_context_menus (fun () ->
     create_context_menu ~id:"open_in" ~title:"Open link in" ~contexts:[ "link" ];
     create_context_menu ~id:"send_to" ~title:"Send page" ~contexts:[ "page" ];
-    List.iter tenants ~f:(fun tid ->
+    List.iter tenants ~f:(fun (tid, label, connected) ->
+      let is_self = Option.exists self_id ~f:(String.equal tid) in
+      let enabled = connected && not is_self in
+      let title =
+        match (is_self, connected) with
+        | (true, _) -> Printf.sprintf "%s (this)" label
+        | (false, false) -> Printf.sprintf "%s (offline)" label
+        | (false, true) -> label
+      in
       create_child_context_menu
         ~id:(Printf.sprintf "open_in:%s" tid) ~parent_id:"open_in"
-        ~title:tid ~contexts:[ "link" ];
+        ~title ~contexts:[ "link" ] ~enabled ();
       create_child_context_menu
         ~id:(Printf.sprintf "send_to:%s" tid) ~parent_id:"send_to"
-        ~title:tid ~contexts:[ "page" ]);
+        ~title ~contexts:[ "page" ] ~enabled ());
     create_context_menu ~id:"add_rule" ~title:"Add rule" ~contexts:[ "page" ];
     create_context_menu ~id:"delete_rule" ~title:"Delete matching rule" ~contexts:[ "page" ])
 
@@ -491,10 +506,10 @@ let handle_event (state : state) (event : event) : state =
     handle_context_menu state menu_id link_url page_url tab_id
   | Popup_query { json; respond } -> handle_popup_query state json respond
   | Setup_menus ->
-    setup_context_menus state.tenant_names;
+    setup_context_menus state.tenant_names state.self_tenant_id;
     state
   | Refresh_menus { tenants } ->
-    setup_context_menus tenants;
+    setup_context_menus tenants state.self_tenant_id;
     { state with tenant_names = tenants }
   | Self_registered { tenant_id } ->
     log (Printf.sprintf "Registered as tenant: %s" tenant_id);

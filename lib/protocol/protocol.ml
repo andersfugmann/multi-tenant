@@ -237,7 +237,9 @@ type _ command =
 
 (* -- Server push *)
 
-type _ server_push = Navigate : url -> url server_push
+type _ server_push =
+  | Navigate : url -> url server_push
+  | Config_updated : (config * string list) -> (config * string list) server_push
 
 type packed_server_push = Push : 'a server_push -> packed_server_push
 
@@ -403,11 +405,27 @@ let serialize_push : type a. a server_push -> string =
  fun push ->
   match push with
   | Navigate url -> Printf.sprintf "NAVIGATE %s" url
+  | Config_updated (cfg, registered) ->
+    let json = `Assoc [
+      ("config", config_to_yojson cfg);
+      ("registered_tenants", `List (List.map registered ~f:(fun s -> `String s)));
+    ] in
+    Printf.sprintf "CONFIG_UPDATED %s" (Yojson.Safe.to_string json)
 
 let deserialize_push (line : string) : (packed_server_push, string) Result.t =
   match String.split line ~on:' ' with
   | "NAVIGATE" :: (_ :: _ as url_parts) ->
     Ok (Push (Navigate (rejoin url_parts)))
+  | "CONFIG_UPDATED" :: (_ :: _ as json_parts) ->
+    let* json = parse_json_string (rejoin json_parts) in
+    let open Yojson.Safe.Util in
+    let* cfg = config_of_yojson (member "config" json) in
+    let registered =
+      member "registered_tenants" json
+      |> to_list
+      |> List.map ~f:to_string
+    in
+    Ok (Push (Config_updated (cfg, registered)))
   | _ -> Error (Printf.sprintf "unknown push: %s" line)
 
 (* -- JSON wire types *)
@@ -439,6 +457,7 @@ module Wire = struct
   type push =
     | Navigate of { url : string }
     | Registered of { tenant_id : string }
+    | Config_updated of { config : config; registered_tenants : string list }
   [@@deriving yojson]
 
   type bridge_message =
@@ -559,6 +578,8 @@ let bridge_push_to_yojson (push : packed_server_push) : Yojson.Safe.t =
   match push with
   | Push (Navigate url) ->
     Wire.bridge_message_to_yojson (Push (Navigate { url }))
+  | Push (Config_updated (cfg, registered)) ->
+    Wire.bridge_message_to_yojson (Push (Config_updated { config = cfg; registered_tenants = registered }))
 
 let bridge_message_of_yojson (json : Yojson.Safe.t) :
     (Wire.bridge_message, string) Result.t =
@@ -782,6 +803,22 @@ let%expect_test "line: round-trip push navigate with spaces" =
    | _ -> print_endline "FAIL");
   [%expect {| url=https://example.com/q=hello world |}]
 
+let%expect_test "line: round-trip push config_updated" =
+  let cfg : config = {
+    listen = ["127.0.0.1:7120"];
+    allowed_networks = ["127.0.0.0/8"];
+    tenants = [("work", { browser_cmd = None; label = "Work"; color = "#ff0000"; brand = None })];
+    rules = [];
+    defaults = { unmatched = "local"; cooldown_seconds = 5; browser_launch_timeout = 10 };
+  } in
+  let registered = ["work"; "personal"] in
+  let line = serialize_push (Config_updated (cfg, registered)) in
+  (match deserialize_push line with
+   | Ok (Push (Config_updated (c, r))) ->
+     printf "tenants=%d registered=%d\n" (List.length c.tenants) (List.length r)
+   | _ -> print_endline "FAIL");
+  [%expect {| tenants=1 registered=2 |}]
+
 (* -- JSON: commands *)
 
 let%expect_test "json: round-trip register" =
@@ -918,6 +955,21 @@ let%expect_test "json: bridge push round-trip" =
   [%expect {|
     ["Push",["Navigate",{"url":"https://example.com"}]]
     url=https://example.com |}]
+
+let%expect_test "json: bridge push config_updated round-trip" =
+  let cfg : config = {
+    listen = ["127.0.0.1:7120"];
+    allowed_networks = ["127.0.0.0/8"];
+    tenants = [("work", { browser_cmd = None; label = "Work"; color = "#ff0000"; brand = None })];
+    rules = [];
+    defaults = { unmatched = "local"; cooldown_seconds = 5; browser_launch_timeout = 10 };
+  } in
+  let json = bridge_push_to_yojson (Push (Config_updated (cfg, ["work"]))) in
+  (match bridge_message_of_yojson json with
+   | Ok (Wire.Push (Wire.Config_updated { config = c; registered_tenants = r })) ->
+     printf "tenants=%d registered=%d\n" (List.length c.tenants) (List.length r)
+   | _ -> print_endline "FAIL");
+  [%expect {| tenants=1 registered=1 |}]
 
 let%expect_test "json: bridge response round-trip" =
   let json = bridge_response_to_yojson (Register None) (Ok "myhost") in

@@ -256,7 +256,7 @@ module Context_menus = struct
               ]) |]
 
   let create_child ~(id : string) ~(parent_id : string)
-      ~(title : string) ~(contexts : string list) : unit =
+      ~(title : string) ~(contexts : string list) ?(enabled = true) () : unit =
     let contexts_arr =
       contexts |> List.map ~f:Js.string |> Array.of_list |> Js.array
     in
@@ -269,6 +269,7 @@ module Context_menus = struct
                 ("title", inject (Js.string title));
                 ("contexts", inject contexts_arr);
                 ("documentUrlPatterns", inject web_url_patterns);
+                ("enabled", inject (Js.bool enabled));
               ]) |]
 
   let remove_all (f : unit -> unit) : unit =
