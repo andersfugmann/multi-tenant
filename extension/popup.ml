@@ -8,6 +8,11 @@ let status_dot = Page_util.get_by_id "statusDot"
 let status_text = Page_util.get_by_id "statusText"
 let tenant_list = Page_util.get_by_id "tenantList"
 let footer = Page_util.get_by_id "footer"
+let btn_add_rule = Page_util.get_by_id "btnAddRule"
+let btn_delete_rule = Page_util.get_by_id "btnDeleteRule"
+
+(* Track whether the active tab is actionable *)
+let page_is_internal = ref true
 
 (* -- Helpers -- *)
 
@@ -124,6 +129,7 @@ let render_tenants (json : Yojson.Safe.t) : unit =
          let btn = Dom_html.createButton doc in
          Page_util.set_class (btn :> Dom_html.element Js.t) "tenant-send";
          Page_util.set_text (btn :> Dom_html.element Js.t) "Send ↗";
+         Page_util.set_disabled (btn :> Dom_html.element Js.t) !page_is_internal;
          Page_util.on_click (btn :> Dom_html.element Js.t) (fun () ->
            send_page_to id);
          Dom.appendChild li btn);
@@ -133,21 +139,28 @@ let render_tenants (json : Yojson.Safe.t) : unit =
 (* -- Load tenants on popup open -- *)
 
 let () =
-  Page_util.send_message
-    (`Assoc [ ("action", `String "query_tenants") ])
-    ~on_response:(fun result ->
-      match result with
-      | Error _ ->
-        set_status false "Not connected";
-        Page_util.set_html tenant_list
-          {|<li style="color:#5f6368">Not connected</li>|}
-      | Ok json ->
-        let registered = member "registered_tenants" json |> to_string_list in
-        set_status (not (List.is_empty registered)) 
-          (match List.is_empty registered with
-           | true -> "Disconnected"
-           | false -> Printf.sprintf "Connected (%d tenants)" (List.length registered));
-        render_tenants json)
+  (* Check active tab URL first to determine if actions should be enabled *)
+  Page_util.query_active_tab ~on_result:(fun url _tab_id ->
+    let is_internal = Page_util.is_internal_url url in
+    page_is_internal := is_internal;
+    Page_util.set_disabled btn_add_rule is_internal;
+    Page_util.set_disabled btn_delete_rule is_internal;
+    (* Then fetch tenant data *)
+    Page_util.send_message
+      (`Assoc [ ("action", `String "query_tenants") ])
+      ~on_response:(fun result ->
+        match result with
+        | Error _ ->
+          set_status false "Not connected";
+          Page_util.set_html tenant_list
+            {|<li style="color:#5f6368">Not connected</li>|}
+        | Ok json ->
+          let registered = member "registered_tenants" json |> to_string_list in
+          set_status (not (List.is_empty registered)) 
+            (match List.is_empty registered with
+             | true -> "Disconnected"
+             | false -> Printf.sprintf "Connected (%d tenants)" (List.length registered));
+          render_tenants json))
 
 (* -- Add routing rule button -- *)
 

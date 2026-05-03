@@ -33,6 +33,19 @@ let get_extension_url (path : string) : string =
 let query_active_tab ~(on_result : string -> int -> unit) : unit =
   Chrome_api.Tabs.query_active ~on_result
 
+let is_internal_url (url : string) : bool =
+  List.exists
+    ~f:(fun prefix -> String.is_prefix url ~prefix)
+    [
+      "chrome://";
+      "chrome-extension://";
+      "about:";
+      "edge://";
+      "brave://";
+      "chrome-search://";
+      "devtools://";
+    ]
+
 let validate_regexp (pattern : string) : (unit, string) Result.t =
   match Regexp.regexp pattern with
   | _ -> Ok ()
@@ -70,6 +83,11 @@ let set_display (el : Dom_html.element Js.t) (value : string) : unit =
 
 let set_class (el : Dom_html.element Js.t) (cls : string) : unit =
   el##.className := Js.string cls
+
+let set_disabled (el : Dom_html.element Js.t) (disabled : bool) : unit =
+  match disabled with
+  | true -> el##setAttribute (Js.string "disabled") (Js.string "")
+  | false -> el##removeAttribute (Js.string "disabled")
 
 let add_class (el : Dom_html.element Js.t) (cls : string) : unit =
   let current = Js.to_string el##.className in

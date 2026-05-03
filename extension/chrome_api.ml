@@ -222,6 +222,10 @@ end
 module Context_menus = struct
   let menus () : _ Js.t = get chrome "contextMenus"
 
+  let web_url_patterns =
+    [| "http://*/*"; "https://*/*" |]
+    |> Array.map ~f:Js.string |> Js.array
+
   let create ~(id : string) ~(title : string)
       ~(contexts : string list) : unit =
     let contexts_arr =
@@ -234,6 +238,7 @@ module Context_menus = struct
                 ("id", inject (Js.string id));
                 ("title", inject (Js.string title));
                 ("contexts", inject contexts_arr);
+                ("documentUrlPatterns", inject web_url_patterns);
               ]) |]
 
   let create_child ~(id : string) ~(parent_id : string)
@@ -249,6 +254,7 @@ module Context_menus = struct
                 ("parentId", inject (Js.string parent_id));
                 ("title", inject (Js.string title));
                 ("contexts", inject contexts_arr);
+                ("documentUrlPatterns", inject web_url_patterns);
               ]) |]
 
   let remove_all (f : unit -> unit) : unit =
