@@ -60,7 +60,7 @@ type test_result =
 (** {1 GADT command type} *)
 
 type _ command =
-  | Register : string option -> unit command
+  | Register : string option -> string command
   | Open : url -> route_result command
   | Open_on : tenant_id * url -> route_result command
   | Test : url -> test_result command
@@ -119,6 +119,7 @@ module Wire : sig
 
   type response =
     | Ok_unit
+    | Ok_registered of { tenant_id : string }
     | Ok_route of route_result
     | Ok_test of test_result
     | Ok_config of config

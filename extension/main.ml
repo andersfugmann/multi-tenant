@@ -62,12 +62,14 @@ type event =
   | Popup_query of { json : Yojson.Safe.t; respond : Yojson.Safe.t -> unit }
   | Setup_menus
   | Refresh_menus of { tenants : string list }
+  | Self_registered of { tenant_id : string }
   | Delete_rule_at of { index : int }
 
 type state = {
   native_port : native_port option;
   pending_callbacks : (Protocol.Wire.response -> unit) list;
   tenant_names : string list;
+  self_tenant_id : string option;
   debug_logging : bool;
 }
 
@@ -80,7 +82,7 @@ let push ev = push_event (Some ev)
 
 (* -- State operations (pure) *)
 
-let initial_state = { native_port = None; pending_callbacks = []; tenant_names = []; debug_logging = false }
+let initial_state = { native_port = None; pending_callbacks = []; tenant_names = []; self_tenant_id = None; debug_logging = false }
 
 let debug (state : state) (msg : string) : unit =
   match state.debug_logging with
@@ -130,14 +132,18 @@ let connect_with_settings (port : native_port) (tenant_name : string) (socket_pa
     (Option.value brand ~default:"(none)")
     (Option.value name ~default:"(default)")
     (Option.value socket ~default:"(default)"));
-  let state = { native_port = Some port; pending_callbacks = []; tenant_names = []; debug_logging } in
+  let state = { native_port = Some port; pending_callbacks = []; tenant_names = []; self_tenant_id = None; debug_logging } in
   update_badge true;
   (* Build Wire.Register directly to include socket/name overrides *)
   let register_wire : Protocol.Wire.command =
     Register { brand; socket; name }
   in
   let json = Protocol.Wire.command_to_yojson register_wire in
-  let state = send_to_bridge state json (fun _wire_resp -> ()) in
+  let state = send_to_bridge state json (fun wire_resp ->
+    match wire_resp with
+    | Protocol.Wire.Ok_registered { tenant_id } ->
+      push (Self_registered { tenant_id })
+    | _ -> ()) in
   send_command state (Command Get_config) (fun wire_resp ->
       match Protocol.response_of_wire Get_config wire_resp with
       | Ok cfg ->
@@ -169,7 +175,7 @@ let connect (_state : state) : state =
                socket_path = find "socket_path";
                debug_logging = String.equal (find "debug_logging") "true";
              }));
-    { native_port = Some p; pending_callbacks = []; tenant_names = []; debug_logging = false }
+    { native_port = Some p; pending_callbacks = []; tenant_names = []; self_tenant_id = None; debug_logging = false }
   | exception exn ->
     log (Printf.sprintf "Failed to connect: %s" (Exn.to_string exn));
     update_badge false;
@@ -303,15 +309,17 @@ let handle_popup_query (state : state) (json : Yojson.Safe.t)
              match !config_ref with
              | Some cfg -> cfg.Protocol.tenants
              | None -> []
-           in
-           respond (`Assoc [
-             ("registered_tenants", `List (List.map registered ~f:(fun s -> `String s)));
-             ("tenants", `Assoc (List.map tenants ~f:(fun (id, tc) ->
-               (id, `Assoc [
-                 ("label", `String tc.Protocol.label);
-                 ("brand", match tc.brand with Some b -> `String b | None -> `Null);
-               ]))))
-           ])
+            in
+            let self = Option.value state.self_tenant_id ~default:"" in
+            respond (`Assoc [
+              ("self_tenant_id", `String self);
+              ("registered_tenants", `List (List.map registered ~f:(fun s -> `String s)));
+              ("tenants", `Assoc (List.map tenants ~f:(fun (id, tc) ->
+                (id, `Assoc [
+                  ("label", `String tc.Protocol.label);
+                  ("brand", match tc.brand with Some b -> `String b | None -> `Null);
+                ]))))
+            ])
        in
        let state = send_command state (Command Status) (fun wire_resp ->
            (match Protocol.response_of_wire Status wire_resp with
@@ -479,6 +487,9 @@ let handle_event (state : state) (event : event) : state =
   | Refresh_menus { tenants } ->
     setup_context_menus tenants;
     { state with tenant_names = tenants }
+  | Self_registered { tenant_id } ->
+    log (Printf.sprintf "Registered as tenant: %s" tenant_id);
+    { state with self_tenant_id = Some tenant_id }
   | Delete_rule_at { index } ->
     handle_delete_rule_at state index
 

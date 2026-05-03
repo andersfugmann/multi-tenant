@@ -62,7 +62,7 @@ let send_page_to (tenant : string) : unit =
 
 (* -- Render tenants -- *)
 
-let render_tenants (json : Yojson.Safe.t) : unit =
+let render_tenants (json : Yojson.Safe.t) (self_id : string) : unit =
   let registered_set =
     member "registered_tenants" json
     |> to_string_list
@@ -113,6 +113,14 @@ let render_tenants (json : Yojson.Safe.t) : unit =
       Page_util.set_text (name_span :> Dom_html.element Js.t) id;
       Dom.appendChild li name_span;
 
+      (match String.equal id self_id with
+       | false -> ()
+       | true ->
+         let you = Dom_html.createSpan doc in
+         Page_util.set_class (you :> Dom_html.element Js.t) "tenant-label";
+         Page_util.set_text (you :> Dom_html.element Js.t) "(this)";
+         Dom.appendChild li you);
+
       (match String.is_empty label with
        | true -> ()
        | false ->
@@ -122,8 +130,8 @@ let render_tenants (json : Yojson.Safe.t) : unit =
            (Printf.sprintf "(%s)" label);
          Dom.appendChild li lbl);
 
-      (* Send-to button *)
-      (match is_connected with
+      (* Send-to button — skip for self tenant *)
+      (match is_connected && not (String.equal id self_id) with
        | false -> ()
        | true ->
          let btn = Dom_html.createButton doc in
@@ -156,11 +164,15 @@ let () =
             {|<li style="color:#5f6368">Not connected</li>|}
         | Ok json ->
           let registered = member "registered_tenants" json |> to_string_list in
+          let self_id = member "self_tenant_id" json |> to_string_j in
           set_status (not (List.is_empty registered)) 
             (match List.is_empty registered with
              | true -> "Disconnected"
-             | false -> Printf.sprintf "Connected (%d tenants)" (List.length registered));
-          render_tenants json))
+             | false ->
+               match String.is_empty self_id with
+               | true -> Printf.sprintf "Connected (%d tenants)" (List.length registered)
+               | false -> Printf.sprintf "Connected as %s" self_id);
+          render_tenants json self_id))
 
 (* -- Add routing rule button -- *)
 

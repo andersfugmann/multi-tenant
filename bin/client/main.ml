@@ -160,27 +160,47 @@ let cli_term () =
 (* Format response as human-readable CLI output *)
 
 let format_response : type a. a Protocol.command -> (a, string) Result.t -> string = fun cmd resp ->
-  match cmd, resp with
-  | _, Error msg -> Printf.sprintf "Error: %s" msg
-  | Protocol.Register _, Ok () -> "OK"
-  | Protocol.Open _, Ok Local -> "Local"
-  | Protocol.Open_on _, Ok Local -> "Local"
-  | Protocol.Open _, Ok Remote tid -> Printf.sprintf "Remote: %s" tid
-  | Protocol.Open_on _, Ok Remote tid -> Printf.sprintf "Remote: %s" tid
-  | Protocol.Test _, Ok Match { tenant; rule_index } ->
-    Printf.sprintf "Match: tenant=%s rule=%d" tenant rule_index
-  | Protocol.Test _, Ok No_match { default_tenant } ->
-    Printf.sprintf "No match: default=%s" default_tenant
-  | Protocol.Get_config, Ok value ->
-    Yojson.Safe.pretty_to_string (Protocol.config_to_yojson value)
-  | Protocol.Set_config _, Ok () -> "OK"
-  | Protocol.Add_rule _, Ok () -> "OK"
-  | Protocol.Update_rule _, Ok () -> "OK"
-  | Protocol.Delete_rule _, Ok () -> "OK"
-  | Protocol.Status, Ok info ->
-    Printf.sprintf "Tenants: %s\nUptime: %ds"
-      (String.concat ~sep:", " info.registered_tenants)
-      info.uptime_seconds
+  match cmd with
+  | Protocol.Register _ ->
+    (match resp with
+     | Error msg -> Printf.sprintf "Error: %s" msg
+     | Ok tid -> Printf.sprintf "Registered as %s" tid)
+  | Protocol.Open _ ->
+    (match resp with
+     | Error msg -> Printf.sprintf "Error: %s" msg
+     | Ok Local -> "Local"
+     | Ok (Remote tid) -> Printf.sprintf "Remote: %s" tid)
+  | Protocol.Open_on _ ->
+    (match resp with
+     | Error msg -> Printf.sprintf "Error: %s" msg
+     | Ok Local -> "Local"
+     | Ok (Remote tid) -> Printf.sprintf "Remote: %s" tid)
+  | Protocol.Test _ ->
+    (match resp with
+     | Error msg -> Printf.sprintf "Error: %s" msg
+     | Ok (Match { tenant; rule_index }) ->
+       Printf.sprintf "Match: tenant=%s rule=%d" tenant rule_index
+     | Ok (No_match { default_tenant }) ->
+       Printf.sprintf "No match: default=%s" default_tenant)
+  | Protocol.Get_config ->
+    (match resp with
+     | Error msg -> Printf.sprintf "Error: %s" msg
+     | Ok value -> Yojson.Safe.pretty_to_string (Protocol.config_to_yojson value))
+  | Protocol.Set_config _ ->
+    (match resp with Error msg -> Printf.sprintf "Error: %s" msg | Ok () -> "OK")
+  | Protocol.Add_rule _ ->
+    (match resp with Error msg -> Printf.sprintf "Error: %s" msg | Ok () -> "OK")
+  | Protocol.Update_rule _ ->
+    (match resp with Error msg -> Printf.sprintf "Error: %s" msg | Ok () -> "OK")
+  | Protocol.Delete_rule _ ->
+    (match resp with Error msg -> Printf.sprintf "Error: %s" msg | Ok () -> "OK")
+  | Protocol.Status ->
+    (match resp with
+     | Error msg -> Printf.sprintf "Error: %s" msg
+     | Ok info ->
+       Printf.sprintf "Tenants: %s\nUptime: %ds"
+         (String.concat ~sep:", " info.registered_tenants)
+         info.uptime_seconds)
 
 (* -- Send a command to the daemon and get a response (CLI) *)
 
@@ -211,7 +231,7 @@ let run_register ~net ~sock_path ~tenant =
   let flow =
     Eio.Net.connect ~sw net (`Unix sock_path)
   in
-  let server_cmd : unit Protocol.server_command =
+  let server_cmd : string Protocol.server_command =
     { tenant; command = Register None }
   in
   let line = Protocol.serialize_server_command server_cmd in
@@ -219,7 +239,7 @@ let run_register ~net ~sock_path ~tenant =
   let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
   let first_line = Eio.Buf_read.line reader in
   (match Protocol.deserialize_response (Register None) first_line with
-   | Ok () -> printf "Registered as %s\n%!" tenant
+   | Ok tid -> printf "Registered as %s\n%!" tid
    | Error msg ->
      eprintf "Registration failed: %s\n%!" msg;
      Stdlib.exit 1);
@@ -316,13 +336,13 @@ let bridge_command_fiber ~net ~tenant ~sock_path ~stdin_flow
 
 let bridge_push_fiber ~net ~tenant ~brand ~sock_path
     ~(write_out : Yojson.Safe.t -> unit)
-    ~(on_registered : unit -> unit) : unit =
+    ~(on_registered : string -> unit) : unit =
   match
     Eio.Switch.run @@ fun sw ->
     let flow =
       Eio.Net.connect ~sw net (`Unix sock_path)
     in
-    let server_cmd : unit Protocol.server_command =
+    let server_cmd : string Protocol.server_command =
       { tenant; command = Register brand }
     in
     let line = Protocol.serialize_server_command server_cmd in
@@ -330,8 +350,8 @@ let bridge_push_fiber ~net ~tenant ~brand ~sock_path
     let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
     let first_line = Eio.Buf_read.line reader in
     (match Protocol.deserialize_response (Register brand) first_line with
-     | Ok () -> on_registered ()
-     | Error _msg -> on_registered ());
+     | Ok tid -> on_registered tid
+     | Error _msg -> on_registered tenant);
     let rec read_loop () =
       let push_line = Eio.Buf_read.line reader in
       (match Protocol.deserialize_push push_line with
@@ -344,7 +364,7 @@ let bridge_push_fiber ~net ~tenant ~brand ~sock_path
     read_loop ()
   with
   | () -> ()
-  | exception _exn -> on_registered ()
+  | exception _exn -> on_registered tenant
 
 (* -- Bridge mode entry point *)
 
@@ -364,8 +384,6 @@ let run_bridge env =
     | Some json ->
       (match Protocol.Wire.command_of_yojson json with
        | Ok (Register { brand; socket; name }) ->
-         let resp = Protocol.bridge_response_to_yojson (Register brand) (Ok ()) in
-         write_out resp;
          let tenant = Option.value name ~default:default_tenant in
          (brand, tenant, socket)
        | _ ->
@@ -379,11 +397,13 @@ let run_bridge env =
   let (registered, resolve_registered) = Eio.Promise.create () in
   let resolve_once =
     let resolved = ref false in
-    fun () ->
+    fun tid ->
       match !resolved with
       | true -> ()
       | false ->
         resolved := true;
+        let resp = Protocol.bridge_response_to_yojson (Register brand) (Ok tid) in
+        write_out resp;
         Eio.Promise.resolve resolve_registered ()
   in
   Eio.Fiber.both

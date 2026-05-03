@@ -43,7 +43,7 @@ type coordinator_msg =
       tenant : string;
       brand : string option;
       push_stream : string Eio.Stream.t;
-      reply : (unit, string) Result.t Eio.Promise.u;
+      reply : (string, string) Result.t Eio.Promise.u;
     }
   | Unregister_tenant of { tenant : string }
   | Launch_timeout of { tenant : string }
@@ -394,7 +394,7 @@ let rec coordinator_loop state inbox ~sw ~clock =
          state
        | false ->
          let registry = Map.set state.registry ~key:tenant ~data:push_stream in
-         Eio.Promise.resolve reply (Ok ());
+         Eio.Promise.resolve reply (Ok tenant);
          log "tenant %s registered (brand=%s)" tenant
            (Option.value brand ~default:"(none)");
          let state = { state with registry } in
@@ -461,9 +461,9 @@ let handle_register inbox ~tenant ~brand flow reader =
   | Error msg ->
     let err = Protocol.serialize_response (Register brand) (Error msg) in
     Eio.Flow.copy_string (err ^ "\n") flow
-  | Ok () ->
+  | Ok tenant_id ->
     (match
-       let ok = Protocol.serialize_response (Register brand) (Ok ()) in
+       let ok = Protocol.serialize_response (Register brand) (Ok tenant_id) in
        Eio.Flow.copy_string (ok ^ "\n") flow;
        Eio.Fiber.both
          (fun () ->

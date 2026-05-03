@@ -77,7 +77,7 @@ type test_result =
 (* -- GADT command type *)
 
 type _ command =
-  | Register : string option -> unit command
+  | Register : string option -> string command
   | Open : url -> route_result command
   | Open_on : tenant_id * url -> route_result command
   | Test : url -> test_result command
@@ -192,7 +192,7 @@ let serialize_response : type a. a command -> (a, string) Result.t -> string =
   | Error msg -> Printf.sprintf "ERR %s" msg
   | Ok value ->
     (match cmd with
-     | Register _ -> "OK"
+     | Register _ -> Printf.sprintf "OK %s" value
      | Open _ ->
        (match value with
         | Local -> "LOCAL"
@@ -223,7 +223,7 @@ let deserialize_response :
  fun cmd line ->
   match (cmd, String.split line ~on:' ') with
   | (_, "ERR" :: rest) -> Error (rejoin rest)
-  | (Register _, [ "OK" ]) -> Ok ()
+  | (Register _, [ "OK"; tid ]) -> Ok tid
   | (Set_config _, [ "OK" ]) -> Ok ()
   | (Add_rule _, [ "OK" ]) -> Ok ()
   | (Update_rule _, [ "OK" ]) -> Ok ()
@@ -281,6 +281,7 @@ module Wire = struct
 
   type response =
     | Ok_unit
+    | Ok_registered of { tenant_id : string }
     | Ok_route of route_result
     | Ok_test of test_result
     | Ok_config of config
@@ -329,7 +330,7 @@ let response_to_wire : type a. a command -> (a, string) Result.t -> Wire.respons
   | Error msg -> Err { message = msg }
   | Ok value ->
     (match cmd with
-     | Register _ -> Ok_unit
+     | Register _ -> Ok_registered { tenant_id = value }
      | Open _ -> Ok_route value
      | Open_on _ -> Ok_route value
      | Test _ -> Ok_test value
@@ -346,12 +347,15 @@ let response_of_wire : type a. a command -> Wire.response -> (a, string) Result.
   | Err { message } -> Error message
   | Ok_unit ->
     (match cmd with
-     | Register _ -> Ok ()
      | Set_config _ -> Ok ()
      | Add_rule _ -> Ok ()
      | Update_rule _ -> Ok ()
      | Delete_rule _ -> Ok ()
      | _ -> Error "unexpected Ok_unit for this command")
+  | Ok_registered { tenant_id } ->
+    (match cmd with
+     | Register _ -> Ok tenant_id
+     | _ -> Error "unexpected Ok_registered for this command")
   | Ok_route r ->
     (match cmd with
      | Open _ -> Ok r
@@ -556,8 +560,8 @@ let%expect_test "line: round-trip delete_rule" =
 (* -- Line protocol: responses *)
 
 let%expect_test "line: response OK" =
-  print_endline (serialize_response (Register None) (Ok ()));
-  [%expect {| OK |}]
+  print_endline (serialize_response (Register None) (Ok "myhost"));
+  [%expect {| OK myhost |}]
 
 let%expect_test "line: response LOCAL" =
   print_endline (serialize_response (Open "https://x.com") (Ok Local));
@@ -698,9 +702,9 @@ let%expect_test "json: round-trip delete_rule" =
 (* -- JSON: responses *)
 
 let%expect_test "json: response ok" =
-  let json = serialize_response_json (Register None) (Ok ()) in
+  let json = serialize_response_json (Register None) (Ok "myhost") in
   print_endline (Yojson.Safe.to_string json);
-  [%expect {| ["Ok_unit"] |}]
+  [%expect {| ["Ok_registered",{"tenant_id":"myhost"}] |}]
 
 let%expect_test "json: response local" =
   let json = serialize_response_json (Open "https://x.com") (Ok Local) in
@@ -764,11 +768,11 @@ let%expect_test "json: bridge push round-trip" =
     url=https://example.com |}]
 
 let%expect_test "json: bridge response round-trip" =
-  let json = bridge_response_to_yojson (Register None) (Ok ()) in
+  let json = bridge_response_to_yojson (Register None) (Ok "myhost") in
   (match bridge_message_of_yojson json with
-   | Ok (Wire.Response Wire.Ok_unit) -> print_endline "ok_unit"
+   | Ok (Wire.Response (Wire.Ok_registered { tenant_id })) -> printf "registered=%s\n" tenant_id
    | _ -> print_endline "FAIL");
-  [%expect {| ok_unit |}]
+  [%expect {| registered=myhost |}]
 
 (* -- Error handling *)
 
