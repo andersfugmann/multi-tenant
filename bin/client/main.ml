@@ -1,5 +1,5 @@
-open Base
-open Stdio
+open! Base
+open! Stdio
 
 (* -- Socket path *)
 

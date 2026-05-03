@@ -1,5 +1,5 @@
-open Base
-open Stdio
+open !Base
+open !Stdio
 
 (* -- Core data types *)
 
@@ -404,9 +404,6 @@ let bridge_push_to_yojson (push : packed_server_push) : Yojson.Safe.t =
 let bridge_message_of_yojson (json : Yojson.Safe.t) :
     (Wire.bridge_message, string) Result.t =
   Wire.bridge_message_of_yojson json
-
-(* Suppress unused open warnings — Stdio is used by convention *)
-let () = ignore (print_endline : string -> unit)
 
 (* -- Inline expect tests *)
 

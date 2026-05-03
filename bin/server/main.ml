@@ -1,5 +1,5 @@
-open Base
-open Stdio
+open! Base
+open! Stdio
 
 let default_socket_path () =
   "/run/user/" ^ Int.to_string (Unix.getuid ()) ^ "/alloy.sock"

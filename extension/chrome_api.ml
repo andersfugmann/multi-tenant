@@ -1,11 +1,9 @@
 (* chrome_api.ml — Typed OCaml bindings for Chrome extension APIs.
    All Js.Unsafe usage in the project is confined to this module. *)
 
-open Base
-open Stdio
+open! Base
+open! Stdio
 open Js_of_ocaml
-
-let () = ignore (print_endline : string -> unit)
 
 (* ── Internal unsafe primitives ──────────────────────────────────── *)
 

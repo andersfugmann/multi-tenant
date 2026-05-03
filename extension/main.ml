@@ -1,9 +1,6 @@
-open Base
-open Stdio
+open! Base
+open! Stdio
 open Js_of_ocaml
-
-(* Suppress unused open *)
-let () = ignore (print_endline : string -> unit)
 
 let log = Chrome_api.log
 

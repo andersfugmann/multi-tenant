@@ -2,7 +2,7 @@
 
 ## Language and Style
 
-- Always `open Base` and `open Stdio` at the top of every module.
+- Always `open! Base` and `open! Stdio` at the top of every module.
 - Prefer higher-order functions (`List.map`, `List.filter`, `List.fold`, `Option.bind`, etc.) over manual recursion.
 - Never use `for` or `while` loops.
 - Never use `if` expressions; use pattern matching instead.

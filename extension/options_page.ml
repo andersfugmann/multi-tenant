@@ -1,8 +1,6 @@
-open Base
-open Stdio
+open! Base
+open! Stdio
 open Js_of_ocaml
-
-let () = ignore (print_endline : string -> unit)
 
 (* -- DOM elements -- *)
 
