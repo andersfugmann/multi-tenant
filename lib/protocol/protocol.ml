@@ -412,7 +412,7 @@ let () = ignore (print_endline : string -> unit)
 
 let%expect_test "sample data" =
   let _rule =
-    { pattern = ".*\\.example\\.com"; target = "work"; enabled = true }
+    { pattern = ".*[.]example[.]com"; target = "work"; enabled = true }
   in
   let _tenant_cfg =
     { browser_cmd = Some "chromium"; label = "Work"; color = "#0000ff"; brand = None }
@@ -500,7 +500,7 @@ let sample_config =
             brand = Some "Google Chrome" } );
       ];
     rules =
-      [ { pattern = ".*\\.example\\.com"; target = "work"; enabled = true } ];
+      [ { pattern = ".*[.]example[.]com"; target = "work"; enabled = true } ];
     defaults =
       { unmatched = "personal"; cooldown_seconds = 5; browser_launch_timeout = 10 };
   }
@@ -517,7 +517,7 @@ let%expect_test "line: round-trip set_config" =
   [%expect {| tenant=host socket=/run/alloy.sock rules=1 |}]
 
 let sample_rule =
-  { pattern = ".*\\.example\\.com"; target = "work"; enabled = true }
+  { pattern = ".*[.]example[.]com"; target = "work"; enabled = true }
 
 let%expect_test "line: round-trip add_rule" =
   let line =
@@ -528,7 +528,7 @@ let%expect_test "line: round-trip add_rule" =
      printf "tenant=%s pattern=%s target=%s enabled=%b\n" tenant r.pattern
        r.target r.enabled
    | _ -> print_endline "FAIL");
-  [%expect {| tenant=host pattern=.*\.example\.com target=work enabled=true |}]
+  [%expect {| tenant=host pattern=.*[.]example[.]com target=work enabled=true |}]
 
 let%expect_test "line: round-trip update_rule" =
   let line =
@@ -539,7 +539,7 @@ let%expect_test "line: round-trip update_rule" =
    | Ok (Server_command { tenant; command = Update_rule (idx, r) }) ->
      printf "tenant=%s idx=%d pattern=%s\n" tenant idx r.pattern
    | _ -> print_endline "FAIL");
-  [%expect {| tenant=host idx=2 pattern=.*\.example\.com |}]
+  [%expect {| tenant=host idx=2 pattern=.*[.]example[.]com |}]
 
 let%expect_test "line: round-trip delete_rule" =
   let line =
@@ -676,7 +676,7 @@ let%expect_test "json: round-trip add_rule" =
   (match deserialize_command_json json with
    | Ok (Command (Add_rule r)) -> printf "pattern=%s\n" r.pattern
    | _ -> print_endline "FAIL");
-  [%expect {| pattern=.*\.example\.com |}]
+  [%expect {| pattern=.*[.]example[.]com |}]
 
 let%expect_test "json: round-trip update_rule" =
   let json = serialize_command_json (Update_rule (5, sample_rule)) in
@@ -684,7 +684,7 @@ let%expect_test "json: round-trip update_rule" =
    | Ok (Command (Update_rule (idx, r))) ->
      printf "idx=%d pattern=%s\n" idx r.pattern
    | _ -> print_endline "FAIL");
-  [%expect {| idx=5 pattern=.*\.example\.com |}]
+  [%expect {| idx=5 pattern=.*[.]example[.]com |}]
 
 let%expect_test "json: round-trip delete_rule" =
   let json = serialize_command_json (Delete_rule 7) in

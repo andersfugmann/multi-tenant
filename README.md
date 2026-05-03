@@ -100,7 +100,7 @@ first argument). See [`config.example.json`](config.example.json).
     "work-container": { "browser_cmd": "machinectl shell work -- chromium", "label": "Work", "color": "#EA4335" }
   },
   "rules": [
-    { "pattern": "https://github\\.com/.*", "target": "work-container", "enabled": true }
+    { "pattern": "https://github[.]com/.*", "target": "work-container", "enabled": true }
   ],
   "defaults": {
     "unmatched": "local",
