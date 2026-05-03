@@ -59,9 +59,7 @@ function createMock() {
       },
     },
     action: {
-      setBadgeText: jest.fn(),
-      setBadgeBackgroundColor: jest.fn(),
-      setBadgeTextColor: jest.fn(),
+      setIcon: jest.fn(),
     },
   };
 

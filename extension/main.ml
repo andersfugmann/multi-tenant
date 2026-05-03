@@ -93,13 +93,17 @@ let is_connected (state : state) : bool =
   Option.is_some state.native_port
 
 let update_badge (connected : bool) : unit =
-  Chrome_api.Action.set_badge_text "●";
-  Chrome_api.Action.set_badge_background_color "transparent";
   match connected with
   | true ->
-    Chrome_api.Action.set_badge_text_color "#34a853"
+    Chrome_api.Action.set_icon
+      "icons/icon16_connected.png"
+      "icons/icon48_connected.png"
+      "icons/icon128_connected.png"
   | false ->
-    Chrome_api.Action.set_badge_text_color "#ea4335"
+    Chrome_api.Action.set_icon
+      "icons/icon16_disconnected.png"
+      "icons/icon48_disconnected.png"
+      "icons/icon128_disconnected.png"
 
 let send_to_bridge (state : state) (json : Yojson.Safe.t)
     (on_response : Protocol.Wire.response -> unit) : state =

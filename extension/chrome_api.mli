@@ -29,9 +29,7 @@ module Tabs : sig
 end
 
 module Action : sig
-  val set_badge_text : string -> unit
-  val set_badge_background_color : string -> unit
-  val set_badge_text_color : string -> unit
+  val set_icon : string -> string -> string -> unit
 end
 
 module Windows : sig
