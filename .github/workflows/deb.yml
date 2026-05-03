@@ -7,6 +7,11 @@ on:
         description: "Package version (e.g. 1.0.0)"
         required: true
         type: string
+      publish:
+        description: "Create GitHub Release with .deb assets"
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build-debs:
@@ -55,6 +60,7 @@ jobs:
           path: _build/deb/alloy_*.deb
 
       - name: Create GitHub Release
+        if: inputs.publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

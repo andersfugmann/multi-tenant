@@ -12,23 +12,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install packaging tools
-        run: sudo apt-get update && sudo apt-get install -y fakeroot debhelper
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
       - name: Set up OCaml
         uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: "5"
 
       - name: Install dependencies
-        run: |
-          opam install . --deps-only --with-test
-          cd extension && npm ci
+        run: opam install . --deps-only --with-test
 
       - name: Build
         run: opam exec -- make build
@@ -38,8 +28,3 @@ jobs:
 
       - name: Lint
         run: opam exec -- make lint
-
-      - name: Build Debian packages
-        run: |
-          echo "dummy" > extension/key.pem
-          opam exec -- make deb VERSION=0.0.0-ci
