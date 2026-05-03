@@ -12,6 +12,9 @@ jobs:
   build-debs:
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: write
+
     steps:
       - uses: actions/checkout@v4
 
@@ -50,3 +53,13 @@ jobs:
         with:
           name: alloy_${{ inputs.version }}_amd64.deb
           path: _build/deb/alloy_*.deb
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ inputs.version }}" \
+            --title "v${{ inputs.version }}" \
+            --generate-notes \
+            _build/deb/alloyd_*.deb \
+            _build/deb/alloy_*.deb
