@@ -22,12 +22,12 @@ let parse_address (s : string) : address =
     in
     { host; port }
   | None ->
-    (* host:port — find last colon for port *)
-    (match String.rsplit2 s ~on:':' with
-     | Some (host, port_s) ->
-       let port = Int.of_string_opt port_s |> Option.value ~default:default_port in
-       { host; port }
-     | None -> { host = s; port = default_port })
+    begin match String.rsplit2 s ~on:':' with
+    | Some (host, port_s) ->
+      let port = Int.of_string_opt port_s |> Option.value ~default:default_port in
+      { host; port }
+    | None -> { host = s; port = default_port }
+    end
 
 (* -- CIDR parsing and matching *)
 
@@ -47,47 +47,48 @@ let parse_ipv4 s =
     Some buf
   | _ -> None
 
+let parse_hex_groups strs =
+  let groups = List.map strs ~f:(fun p -> Int.of_string_opt ("0x" ^ p)) in
+  match List.for_all groups ~f:Option.is_some with
+  | true -> Some (List.filter_map groups ~f:Fn.id)
+  | false -> None
+
 let expand_ipv6_groups (s : string) : int list option =
-  (* Split into left::right parts *)
   match String.substr_index s ~pattern:"::" with
   | Some idx ->
     let left_str = String.prefix s idx in
     let right_str = String.drop_prefix s (idx + 2) in
-    let parse_groups str =
-      match String.is_empty str with
-      | true -> []
-      | false -> List.map (String.split str ~on:':') ~f:(fun p -> Int.of_string_opt ("0x" ^ p))
-    in
-    let left = parse_groups left_str in
-    let right = parse_groups right_str in
-    (match List.for_all left ~f:Option.is_some && List.for_all right ~f:Option.is_some with
-     | false -> None
-     | true ->
-       let lv = List.filter_map left ~f:Fn.id in
-       let rv = List.filter_map right ~f:Fn.id in
-       let pad_len = 8 - List.length lv - List.length rv in
-       (match pad_len >= 0 with
-        | true -> Some (lv @ List.init pad_len ~f:(fun _ -> 0) @ rv)
-        | false -> None))
+    let left_parts = match String.is_empty left_str with true -> [] | false -> String.split left_str ~on:':' in
+    let right_parts = match String.is_empty right_str with true -> [] | false -> String.split right_str ~on:':' in
+    begin match (parse_hex_groups left_parts, parse_hex_groups right_parts) with
+    | (Some lv, Some rv) ->
+      let pad_len = 8 - List.length lv - List.length rv in
+      begin match pad_len >= 0 with
+      | true -> Some (lv @ List.init pad_len ~f:(fun _ -> 0) @ rv)
+      | false -> None
+      end
+    | _ -> None
+    end
   | None ->
-    let groups = List.map (String.split s ~on:':') ~f:(fun p -> Int.of_string_opt ("0x" ^ p)) in
-    (match List.length groups = 8 && List.for_all groups ~f:Option.is_some with
-     | true -> Some (List.filter_map groups ~f:Fn.id)
-     | false -> None)
+    let parts = String.split s ~on:':' in
+    begin match List.length parts = 8 with
+    | true -> parse_hex_groups parts
+    | false -> None
+    end
+
+let groups_to_bytes vals =
+  match List.length vals = 8
+        && List.for_all vals ~f:(fun v -> v >= 0 && v <= 0xffff) with
+  | false -> None
+  | true ->
+    let buf = Bytes.create 16 in
+    List.iteri vals ~f:(fun i v ->
+      Bytes.set buf (i * 2) (Char.of_int_exn ((v lsr 8) land 0xff));
+      Bytes.set buf (i * 2 + 1) (Char.of_int_exn (v land 0xff)));
+    Some buf
 
 let parse_ipv6 s =
-  match expand_ipv6_groups s with
-  | None -> None
-  | Some vals ->
-    (match List.length vals = 8
-           && List.for_all vals ~f:(fun v -> v >= 0 && v <= 0xffff) with
-     | false -> None
-     | true ->
-       let buf = Bytes.create 16 in
-       List.iteri vals ~f:(fun i v ->
-         Bytes.set buf (i * 2) (Char.of_int_exn ((v lsr 8) land 0xff));
-         Bytes.set buf (i * 2 + 1) (Char.of_int_exn (v land 0xff)));
-       Some buf)
+  Option.bind (expand_ipv6_groups s) ~f:groups_to_bytes
 
 let ip_to_bytes (s : string) : bytes option =
   match parse_ipv4 s with
@@ -95,49 +96,54 @@ let ip_to_bytes (s : string) : bytes option =
   | None -> parse_ipv6 s
 
 let parse_cidr (s : string) : cidr option =
+  let make_cidr addr prefix_len =
+    let max_bits = Bytes.length addr * 8 in
+    match prefix_len >= 0 && prefix_len <= max_bits with
+    | true -> Some { addr; prefix_len }
+    | false -> None
+  in
   match String.lsplit2 s ~on:'/' with
   | None ->
-    (match ip_to_bytes s with
-     | Some addr ->
-       let prefix_len = Bytes.length addr * 8 in
-       Some { addr; prefix_len }
-     | None -> None)
+    Option.map (ip_to_bytes s) ~f:(fun addr ->
+      { addr; prefix_len = Bytes.length addr * 8 })
   | Some (ip_str, prefix_str) ->
-    (match (ip_to_bytes ip_str, Int.of_string_opt prefix_str) with
-     | (Some addr, Some prefix_len) ->
-       let max_bits = Bytes.length addr * 8 in
-       (match prefix_len >= 0 && prefix_len <= max_bits with
-        | true -> Some { addr; prefix_len }
-        | false -> None)
-     | _ -> None)
+    begin match (ip_to_bytes ip_str, Int.of_string_opt prefix_str) with
+    | (Some addr, Some prefix_len) -> make_cidr addr prefix_len
+    | _ -> None
+    end
+
+let prefix_bytes_match ip_bytes cidr_bytes ~full_bytes =
+  let rec check i =
+    match i >= full_bytes with
+    | true -> true
+    | false ->
+      match Char.equal (Bytes.get ip_bytes i) (Bytes.get cidr_bytes i) with
+      | true -> check (i + 1)
+      | false -> false
+  in
+  check 0
+
+let partial_byte_matches ip_bytes cidr_bytes ~byte_idx ~remaining_bits =
+  let mask = 0xff lsl (8 - remaining_bits) land 0xff in
+  let ip_byte = Char.to_int (Bytes.get ip_bytes byte_idx) in
+  let cidr_byte = Char.to_int (Bytes.get cidr_bytes byte_idx) in
+  Int.equal (ip_byte land mask) (cidr_byte land mask)
 
 let ip_in_cidr (ip : string) (cidr : cidr) : bool =
   match ip_to_bytes ip with
   | None -> false
   | Some ip_bytes ->
-    (match Bytes.length ip_bytes = Bytes.length cidr.addr with
-     | false -> false
-     | true ->
-       let full_bytes = cidr.prefix_len / 8 in
-       let remaining_bits = cidr.prefix_len % 8 in
-       let rec check_full i =
-         match i >= full_bytes with
-         | true -> true
-         | false ->
-           (match Char.equal (Bytes.get ip_bytes i) (Bytes.get cidr.addr i) with
-            | true -> check_full (i + 1)
-            | false -> false)
-       in
-       (match check_full 0 with
-        | false -> false
-        | true ->
-          (match remaining_bits > 0 with
-           | false -> true
-           | true ->
-             let mask = 0xff lsl (8 - remaining_bits) land 0xff in
-             let ip_byte = Char.to_int (Bytes.get ip_bytes full_bytes) in
-             let cidr_byte = Char.to_int (Bytes.get cidr.addr full_bytes) in
-             Int.equal (ip_byte land mask) (cidr_byte land mask))))
+    match Bytes.length ip_bytes = Bytes.length cidr.addr with
+    | false -> false
+    | true ->
+      let full_bytes = cidr.prefix_len / 8 in
+      let remaining_bits = cidr.prefix_len % 8 in
+      match prefix_bytes_match ip_bytes cidr.addr ~full_bytes with
+      | false -> false
+      | true ->
+        match remaining_bits > 0 with
+        | false -> true
+        | true -> partial_byte_matches ip_bytes cidr.addr ~byte_idx:full_bytes ~remaining_bits
 
 let ip_allowed ~allowed_networks ip =
   List.exists allowed_networks ~f:(fun cidr -> ip_in_cidr ip cidr)

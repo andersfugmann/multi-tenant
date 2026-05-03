@@ -204,8 +204,15 @@ let format_response : type a. a Protocol.command -> (a, string) Result.t -> stri
 
 (* -- Connect to daemon helper *)
 
+let resolve_host host =
+  match Unix.inet_addr_of_string host with
+  | addr -> addr
+  | exception Failure _ ->
+    let entry = Unix.gethostbyname host in
+    entry.Unix.h_addr_list.(0)
+
 let connect_to_daemon ~sw net (addr : Protocol.address) =
-  let ip = Eio_unix.Net.Ipaddr.of_unix (Unix.inet_addr_of_string addr.host) in
+  let ip = Eio_unix.Net.Ipaddr.of_unix (resolve_host addr.host) in
   Eio.Net.connect ~sw net (`Tcp (ip, addr.port))
 
 (* -- Send a command to the daemon and get a response (CLI) *)
