@@ -168,6 +168,20 @@ module Tabs = struct
     call tabs "query" [| inject query; inject cb |]
 end
 
+(* ── Action (toolbar icon badge) ─────────────────────────────────── *)
+
+module Action = struct
+  let action : _ Js.t = get chrome "action"
+
+  let set_badge_text (text : string) : unit =
+    call action "setBadgeText"
+      [| inject (js_obj [ ("text", inject (Js.string text)) ]) |]
+
+  let set_badge_background_color (color : string) : unit =
+    call action "setBadgeBackgroundColor"
+      [| inject (js_obj [ ("color", inject (Js.string color)) ]) |]
+end
+
 (* ── Windows ─────────────────────────────────────────────────────── *)
 
 module Windows = struct

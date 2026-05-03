@@ -7,16 +7,16 @@
   </defs>
   <!-- Rounded square background -->
   <rect x="4" y="4" width="120" height="120" rx="24" ry="24" fill="url(#bg)"/>
-  <!-- Incoming arrow shaft (left side) -->
-  <line x1="28" y1="64" x2="60" y2="64" stroke="#fff" stroke-width="8" stroke-linecap="round"/>
-  <!-- Upper branch -->
-  <path d="M 58,64 C 72,64 72,38 86,38" fill="none" stroke="#fff" stroke-width="8" stroke-linecap="round"/>
-  <!-- Lower branch -->
-  <path d="M 58,64 C 72,64 72,90 86,90" fill="none" stroke="#fff" stroke-width="8" stroke-linecap="round"/>
-  <!-- Arrowhead upper -->
-  <polygon points="92,28 104,38 92,48" fill="#fff"/>
-  <!-- Arrowhead lower -->
-  <polygon points="92,80 104,90 92,100" fill="#fff"/>
-  <!-- Small dot at split point -->
-  <circle cx="58" cy="64" r="5" fill="#fff"/>
+  <!-- Flask neck -->
+  <rect x="52" y="18" width="24" height="28" rx="4" fill="none" stroke="#fff" stroke-width="6"/>
+  <!-- Neck rim -->
+  <line x1="46" y1="18" x2="82" y2="18" stroke="#fff" stroke-width="6" stroke-linecap="round"/>
+  <!-- Flask body (conical) -->
+  <path d="M 52,46 L 26,94 Q 24,102 32,106 L 96,106 Q 104,102 102,94 L 76,46" fill="none" stroke="#fff" stroke-width="6" stroke-linejoin="round"/>
+  <!-- Liquid inside -->
+  <path d="M 34,88 L 94,88 Q 100,98 94,104 L 34,104 Q 28,98 34,88 Z" fill="#A8D8FF" opacity="0.7"/>
+  <!-- Bubbles -->
+  <circle cx="50" cy="78" r="5" fill="#fff" opacity="0.7"/>
+  <circle cx="70" cy="72" r="4" fill="#fff" opacity="0.5"/>
+  <circle cx="80" cy="82" r="4.5" fill="#fff" opacity="0.6"/>
 </svg>

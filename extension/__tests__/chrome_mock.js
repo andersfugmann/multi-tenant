@@ -58,6 +58,10 @@ function createMock() {
         addListener: jest.fn((cb) => listeners.onContextMenuClicked.push(cb)),
       },
     },
+    action: {
+      setBadgeText: jest.fn(),
+      setBadgeBackgroundColor: jest.fn(),
+    },
   };
 
   return { chrome, listeners, ports };

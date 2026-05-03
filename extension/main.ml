@@ -90,6 +90,15 @@ let debug (state : state) (msg : string) : unit =
 let is_connected (state : state) : bool =
   Option.is_some state.native_port
 
+let update_badge (connected : bool) : unit =
+  match connected with
+  | true ->
+    Chrome_api.Action.set_badge_text "●";
+    Chrome_api.Action.set_badge_background_color "#34a853"
+  | false ->
+    Chrome_api.Action.set_badge_text "●";
+    Chrome_api.Action.set_badge_background_color "#ea4335"
+
 let send_to_bridge (state : state) (json : Yojson.Safe.t)
     (on_response : Protocol.Wire.response -> unit) : state =
   match state.native_port with
@@ -122,6 +131,7 @@ let connect_with_settings (port : native_port) (tenant_name : string) (socket_pa
     (Option.value name ~default:"(default)")
     (Option.value socket ~default:"(default)"));
   let state = { native_port = Some port; pending_callbacks = []; tenant_names = []; debug_logging } in
+  update_badge true;
   (* Build Wire.Register directly to include socket/name overrides *)
   let register_wire : Protocol.Wire.command =
     Register { brand; socket; name }
@@ -162,6 +172,7 @@ let connect (_state : state) : state =
     { native_port = Some p; pending_callbacks = []; tenant_names = []; debug_logging = false }
   | exception exn ->
     log (Printf.sprintf "Failed to connect: %s" (Exn.to_string exn));
+    update_badge false;
     initial_state
 
 (* -- Event handlers (pure state transformers) *)
@@ -453,6 +464,7 @@ let handle_event (state : state) (event : event) : state =
   | Bridge_message { raw } -> handle_bridge_message state raw
   | Port_disconnected ->
     log "Native port disconnected, reconnecting in 2s…";
+    update_badge false;
     Chrome_api.set_timeout (fun () -> push Connect_requested) 2000;
     { initial_state with debug_logging = state.debug_logging }
   | Connect_requested -> connect state
@@ -507,6 +519,7 @@ let register_chrome_listeners () : unit =
 
 let () =
   log "Alloy extension starting";
+  update_badge false;
   register_chrome_listeners ();
   push Connect_requested;
   Lwt.async (fun () -> coordinator initial_state)

@@ -509,7 +509,7 @@ let handle_connection inbox flow =
 
 (* -- Main *)
 
-let default_config_path () =
+let default_config_path =
   Sys.getenv_exn "HOME" ^ "/.config/alloy/config.json"
 
 let run config_path =
@@ -568,7 +568,7 @@ let () =
   let open Cmdliner in
   let config_path =
     let doc = "Path to configuration file." in
-    Arg.(value & opt string (default_config_path ())
+    Arg.(value & opt string (default_config_path)
          & info [ "config"; "c" ] ~docv:"PATH" ~doc)
   in
   let cmd =

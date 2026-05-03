@@ -28,6 +28,11 @@ module Tabs : sig
   val query_active : on_result:(string -> int -> unit) -> unit
 end
 
+module Action : sig
+  val set_badge_text : string -> unit
+  val set_badge_background_color : string -> unit
+end
+
 module Windows : sig
   val create_popup : url:string -> width:int -> height:int -> unit
 end
