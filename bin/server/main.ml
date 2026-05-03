@@ -193,11 +193,16 @@ let deliver_url (state : state) (target : string) (url : string)
   | None ->
     match Map.find state.starting target with
     | Some sentinel ->
-      let (promise, resolver) = Eio.Promise.create () in
-      let pending = { url; target; reply = resolver } :: sentinel.pending in
-      let starting = Map.set state.starting ~key:target ~data:{ pending } in
-      printf "[url-router] queued URL for starting tenant %s: %s\n%!" target url;
-      ({ state with starting }, promise)
+      (match List.exists sentinel.pending ~f:(fun pd -> String.equal pd.url url) with
+       | true ->
+         printf "[url-router] URL already queued for starting tenant %s: %s\n%!" target url;
+         (state, Eio.Promise.create_resolved (Ok (Protocol.Remote target)))
+       | false ->
+         let (promise, resolver) = Eio.Promise.create () in
+         let pending = { url; target; reply = resolver } :: sentinel.pending in
+         let starting = Map.set state.starting ~key:target ~data:{ pending } in
+         printf "[url-router] queued URL for starting tenant %s: %s\n%!" target url;
+         ({ state with starting }, promise))
     | None ->
       let browser_cmd =
         List.Assoc.find state.config.tenants ~equal:String.equal target
