@@ -167,15 +167,16 @@ let check_and_prune_cooldowns cooldowns ~now ~key =
 
 (* -- Launch browser process (fire-and-forget) *)
 
-let launch_browser cmd =
+let launch_browser ~sw cmd =
   let dev_null = Unix.openfile "/dev/null" [ Unix.O_RDWR ] 0o000 in
   let args = String.split ~on:' ' cmd |> Array.of_list in
-  let pid =
-    (* double fork *)
-    Unix.create_process args.(0) args dev_null dev_null dev_null
-  in
+  let pid = Unix.create_process args.(0) args dev_null dev_null dev_null in
   Unix.close dev_null;
-  printf "[url-router] launched browser (pid %d): %s\n%!" pid cmd
+  printf "[url-router] launched browser (pid %d): %s\n%!" pid cmd;
+  Eio.Fiber.fork ~sw (fun () ->
+    let _pid, _status = Eio_unix.run_in_systhread ~label:"waitpid" (fun () ->
+      Unix.waitpid [] pid) in
+    printf "[url-router] browser process %d exited\n%!" pid)
 
 (* -- Deliver URL to tenant (idempotent, may defer) *)
 
@@ -211,7 +212,7 @@ let deliver_url state target url ~sw ~clock ~inbox =
          let (promise, resolver) = Eio.Promise.create () in
          let sentinel = { pending = [ { url; target; reply = resolver } ] } in
          let starting = List.Assoc.add state.starting ~equal:String.equal target sentinel in
-         launch_browser cmd;
+         launch_browser ~sw cmd;
          let timeout = Float.of_int state.config.defaults.browser_launch_timeout in
          Eio.Fiber.fork ~sw (fun () ->
            Eio.Time.sleep clock timeout;
