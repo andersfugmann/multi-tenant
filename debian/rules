@@ -1,6 +1,6 @@
 #!/usr/bin/make -f
 
-EXT_ID := dihkhgdagigaecpjlbfbiecpocnbeheh
+EXT_ID := jhejkohfkfaeidbbnhjkicadefnapedo
 
 %:
 	dh $@
