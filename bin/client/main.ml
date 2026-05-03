@@ -8,10 +8,6 @@ let socket_path () =
   | Some path -> path
   | None -> Protocol.default_socket_path ()
 
-(* -- Hostname detection *)
-
-let hostname () = Unix.gethostname ()
-
 (* -- CLI argument parsing *)
 
 type cli_mode =
@@ -170,38 +166,28 @@ let cli_term () =
 
 (* Format response as human-readable CLI output *)
 
-let format_response : type a. a Protocol.command -> (a, string) Result.t -> string =
- fun cmd resp ->
-  match resp with
-  | Error msg -> Printf.sprintf "Error: %s" msg
-  | Ok value ->
-    (match cmd with
-     | Protocol.Register _ -> "OK"
-     | Protocol.Open _ ->
-       (match value with
-        | Local -> "Local"
-        | Remote tid -> Printf.sprintf "Remote: %s" tid)
-     | Protocol.Open_on _ ->
-       (match value with
-        | Local -> "Local"
-        | Remote tid -> Printf.sprintf "Remote: %s" tid)
-     | Protocol.Test _ ->
-       (match value with
-        | Match { tenant; rule_index } ->
-          Printf.sprintf "Match: tenant=%s rule=%d" tenant rule_index
-        | No_match { default_tenant } ->
-          Printf.sprintf "No match: default=%s" default_tenant)
-     | Protocol.Get_config ->
-       Yojson.Safe.pretty_to_string (Protocol.config_to_yojson value)
-     | Protocol.Set_config _ -> "OK"
-     | Protocol.Add_rule _ -> "OK"
-     | Protocol.Update_rule _ -> "OK"
-     | Protocol.Delete_rule _ -> "OK"
-     | Protocol.Status ->
-       let info = value in
-       Printf.sprintf "Tenants: %s\nUptime: %ds"
-         (String.concat ~sep:", " info.registered_tenants)
-         info.uptime_seconds)
+let format_response : type a. a Protocol.command -> (a, string) Result.t -> string = fun cmd resp ->
+  match cmd, resp with
+  | _, Error msg -> Printf.sprintf "Error: %s" msg
+  | Protocol.Register _, Ok () -> "OK"
+  | Protocol.Open _, Ok Local -> "Local"
+  | Protocol.Open_on _, Ok Local -> "Local"
+  | Protocol.Open _, Ok Remote tid -> Printf.sprintf "Remote: %s" tid
+  | Protocol.Open_on _, Ok Remote tid -> Printf.sprintf "Remote: %s" tid
+  | Protocol.Test _, Ok Match { tenant; rule_index } ->
+    Printf.sprintf "Match: tenant=%s rule=%d" tenant rule_index
+  | Protocol.Test _, Ok No_match { default_tenant } ->
+    Printf.sprintf "No match: default=%s" default_tenant
+  | Protocol.Get_config, Ok value ->
+    Yojson.Safe.pretty_to_string (Protocol.config_to_yojson value)
+  | Protocol.Set_config _, Ok () -> "OK"
+  | Protocol.Add_rule _, Ok () -> "OK"
+  | Protocol.Update_rule _, Ok () -> "OK"
+  | Protocol.Delete_rule _, Ok () -> "OK"
+  | Protocol.Status, Ok info ->
+    Printf.sprintf "Tenants: %s\nUptime: %ds"
+      (String.concat ~sep:", " info.registered_tenants)
+      info.uptime_seconds
 
 (* -- Send a command to the daemon and get a response (CLI) *)
 
@@ -371,7 +357,7 @@ let bridge_push_fiber ~net ~tenant ~brand ~sock_path
 
 let run_bridge env =
   let net = Eio.Stdenv.net env in
-  let default_tenant = hostname () in
+  let default_tenant = Unix.gethostname () in
   let stdout_mutex = Eio.Mutex.create () in
   let stdout_flow = Eio.Stdenv.stdout env in
   let stdin_flow = Eio.Stdenv.stdin env in
@@ -436,7 +422,7 @@ let run_cli { mode; socket; name } =
   match mode with
   | Bridge -> run_bridge env
   | Register_stream ->
-    run_register ~net ~sock_path:(resolve_socket ()) ~tenant:(resolve_tenant (hostname ()))
+    run_register ~net ~sock_path:(resolve_socket ()) ~tenant:(resolve_tenant (Unix.gethostname ()))
   | Cli_command (Command cmd) ->
     let tenant = resolve_tenant "default" in
     let output = send_command_cli ~net ~tenant ~sock_path:(resolve_socket ()) cmd in
