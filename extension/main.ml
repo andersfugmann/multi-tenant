@@ -181,7 +181,6 @@ let connect (_state : state) : state =
     { native_port = Some p; pending_callbacks = []; tenant_names = []; self_tenant_id = None; debug_logging = false }
   | exception exn ->
     log (Printf.sprintf "Failed to connect: %s" (Exn.to_string exn));
-    update_badge false;
     initial_state
 
 (* -- Event handlers (pure state transformers) *)
@@ -475,7 +474,6 @@ let handle_event (state : state) (event : event) : state =
   | Bridge_message { raw } -> handle_bridge_message state raw
   | Port_disconnected ->
     log "Native port disconnected, reconnecting in 2s…";
-    update_badge false;
     Chrome_api.set_timeout (fun () -> push Connect_requested) 2000;
     { initial_state with debug_logging = state.debug_logging }
   | Connect_requested -> connect state
@@ -492,7 +490,6 @@ let handle_event (state : state) (event : event) : state =
     { state with tenant_names = tenants }
   | Self_registered { tenant_id } ->
     log (Printf.sprintf "Registered as tenant: %s" tenant_id);
-    update_badge true;
     { state with self_tenant_id = Some tenant_id }
   | Delete_rule_at { index } ->
     handle_delete_rule_at state index
@@ -502,6 +499,7 @@ let handle_event (state : state) (event : event) : state =
 let rec coordinator (state : state) : unit Lwt.t =
   let%lwt event = Lwt_stream.next event_stream in
   let state = handle_event state event in
+  update_badge (Option.is_some state.self_tenant_id);
   coordinator state
 
 (* -- Chrome event registration *)

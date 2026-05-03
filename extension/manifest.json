@@ -16,7 +16,11 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_icon": "icons/icon48.png"
+    "default_icon": {
+      "16": "icons/icon16_disconnected.png",
+      "48": "icons/icon48_disconnected.png",
+      "128": "icons/icon128_disconnected.png"
+    }
   },
   "options_page": "options.html",
   "icons": {
