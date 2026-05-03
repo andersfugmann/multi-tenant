@@ -1,6 +1,6 @@
 .PHONY: build test test-extension clean fmt lint install deb help deps
 
-.DEFAULT_GOAL := help
+.DEFAULT_GOAL := build
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'

@@ -129,8 +129,7 @@ let compile_regex (pattern : string) : (Re.re, string) Result.t =
   | exception exn ->
     Error (Printf.sprintf "invalid regex '%s': %s" pattern (Exn.to_string exn))
 
-let evaluate_rules (rules : Protocol.rule list) (url : string)
-    (default : string) : string * int option =
+let evaluate_rules rules url default =
   rules
   |> List.mapi ~f:(fun i rule -> (i, rule))
   |> List.find_map ~f:(fun (i, (rule : Protocol.rule)) ->
@@ -151,30 +150,29 @@ let evaluate_rules (rules : Protocol.rule list) (url : string)
 
 (* -- Cooldown *)
 
-let cooldown_key (tenant : string) (url : string) : string =
-  tenant ^ "\x00" ^ url
+let cooldown_key tenant url =
+  Printf.sprintf "%s:%s" tenant url
 
-let check_and_prune_cooldowns (cooldowns : cooldown_entry list) ~now ~key :
-    bool * cooldown_entry list =
-  let rec go acc = function
+let check_and_prune_cooldowns cooldowns ~now ~key =
+  let rec loop acc = function
     | [] -> (false, List.rev acc)
+    | entry :: _ when Float.(entry.expires < now) ->
+      (false, List.rev acc)
+    | entry :: rest when String.equal entry.key key ->
+      (true, List.rev_append (entry :: acc) rest)
     | entry :: rest ->
-      (match Float.( > ) entry.expires now with
-       | false -> (false, List.rev acc)
-       | true ->
-         (match String.equal entry.key key with
-          | true -> (true, List.rev_append (entry :: acc) rest)
-          | false -> go (entry :: acc) rest))
+      loop (entry :: acc) rest
   in
-  go [] cooldowns
+  loop [] cooldowns
 
 (* -- Launch browser process (fire-and-forget) *)
 
-let launch_browser (cmd : string) : unit =
+let launch_browser cmd =
   let dev_null = Unix.openfile "/dev/null" [ Unix.O_RDWR ] 0o000 in
+  let args = String.split ~on:' ' cmd |> Array.of_list in
   let pid =
-    Unix.create_process "/bin/sh" [| "/bin/sh"; "-c"; cmd |]
-      dev_null dev_null dev_null
+    (* double fork *)
+    Unix.create_process args.(0) args dev_null dev_null dev_null
   in
   Unix.close dev_null;
   printf "[url-router] launched browser (pid %d): %s\n%!" pid cmd
@@ -232,25 +230,25 @@ let handle_open (state : state) (tenant : string) (url : string)
   let target, _idx =
     evaluate_rules state.config.rules url state.config.defaults.unmatched
   in
-  match String.equal tenant "default" with
-  | true ->
-    deliver_url state target url ~sw ~clock ~inbox
-  | false ->
-    let now = Unix.gettimeofday () in
-    let key = cooldown_key tenant url in
-    let (found, pruned) = check_and_prune_cooldowns state.cooldowns ~now ~key in
-    let state = { state with cooldowns = pruned } in
-    (match found with
-     | true -> (state, Eio.Promise.create_resolved (Ok Protocol.Local))
-     | false ->
-       (match String.equal target tenant || String.equal target "local" with
-        | true -> (state, Eio.Promise.create_resolved (Ok Protocol.Local))
-        | false ->
-          let cooldown = Float.of_int state.config.defaults.cooldown_seconds in
-          let state =
-            { state with cooldowns = { key; expires = now +. cooldown } :: state.cooldowns }
-          in
-          deliver_url state target url ~sw ~clock ~inbox))
+  let now = Unix.gettimeofday () in
+  let cooldown_key = cooldown_key tenant url in
+  let (in_cooldown, pruned) = check_and_prune_cooldowns state.cooldowns ~now ~key:cooldown_key in
+  let state = { state with cooldowns = pruned } in
+  let target = match in_cooldown with
+    | true -> "local"
+    | false when String.equal target tenant -> "local"
+    | false -> target
+  in
+
+  (* Only update the cooldowns if the target is not self *)
+  let cooldowns = match target with
+    | "local" -> state.cooldowns
+    | _ ->
+      let cooldown = Float.of_int state.config.defaults.cooldown_seconds in
+      { key = cooldown_key; expires = now +. cooldown } :: state.cooldowns
+  in
+  let state = { state with cooldowns } in
+  deliver_url state target url ~sw ~clock ~inbox
 
 let handle_open_on (state : state) (target : string) (url : string)
     ~sw ~clock ~inbox :

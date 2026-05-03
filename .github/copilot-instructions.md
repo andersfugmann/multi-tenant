@@ -9,6 +9,7 @@
 - Prefer the `|>` (pipe) operator to chain transformations.
 - Avoid redundant checks (e.g., do not test if a list is empty before calling `List.iter` or `List.map`).
 - Functions should be pure. Limit call depth; recursion is acceptable when needed.
+- Only add type signatures to functions when strictly needed (e.g., to resolve ambiguity, for GADTs, or in `.mli` files).
 - Avoid mutable data structures (`ref`, mutable record fields, `Hashtbl`). Use `Map`, `Set`, and immutable records.
 
 ## Libraries and Dependencies
