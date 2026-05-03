@@ -25,8 +25,6 @@ override_dh_auto_test:
 override_dh_auto_install:
 	install -D -m 755 _build/default/bin/server/main.exe \
 		debian/alloyd/usr/bin/alloyd
-	install -D -m 644 debian/alloyd.service \
-		debian/alloyd/usr/lib/systemd/user/alloyd.service
 	install -D -m 755 _build/default/bin/client/main.exe \
 		debian/alloy/usr/bin/alloy
 	# Canonical native messaging manifest

@@ -7,6 +7,7 @@ debian/debhelper-build-stamp
 debian/files
 debian/*.substvars
 debian/*.postrm.debhelper
+debian/*.postinst.debhelper
 debian/alloyd/
 debian/alloy/
 extension/key.pem
