@@ -11,6 +11,8 @@
 - Functions should be pure. Limit call depth; recursion is acceptable when needed.
 - Only add type signatures to functions when strictly needed (e.g., to resolve ambiguity, for GADTs, or in `.mli` files).
 - Avoid mutable data structures (`ref`, mutable record fields, `Hashtbl`). Use `Map`, `Set`, and immutable records.
+- Avoid nested `match` expressions where possible; factor inner matches into helper functions.
+- Prefer `begin match ... end` over `(match ...)` when a match expression must appear inside another expression.
 
 ## Libraries and Dependencies
 
