@@ -247,11 +247,6 @@ type packed_server_push = Push : 'a server_push -> packed_server_push
 
 type packed_command = Command : 'a command -> packed_command
 
-type 'a server_command = { tenant : tenant_id; command : 'a command }
-
-type packed_server_command =
-  | Server_command : 'a server_command -> packed_server_command
-
 (* -- Helpers *)
 
 let ( let* ) r f = Result.bind r ~f
@@ -260,175 +255,6 @@ let parse_json_string (s : string) : (Yojson.Safe.t, string) Result.t =
   match Yojson.Safe.from_string s with
   | json -> Ok json
   | exception Yojson.Json_error msg -> Error (Printf.sprintf "invalid JSON: %s" msg)
-
-(* -- Line protocol: server commands *)
-
-let serialize_server_command : type a. a server_command -> string =
- fun { tenant; command } ->
-  match command with
-  | Register brand ->
-    (match brand with
-     | Some b -> Printf.sprintf "REGISTER %s %s" tenant b
-     | None -> Printf.sprintf "REGISTER %s" tenant)
-  | Open url -> Printf.sprintf "OPEN %s %s" tenant url
-  | Open_on (target, url) ->
-    Printf.sprintf "OPEN-ON %s %s %s" tenant target url
-  | Test url -> Printf.sprintf "TEST %s %s" tenant url
-  | Get_config -> Printf.sprintf "GET-CONFIG %s" tenant
-  | Set_config cfg ->
-    Printf.sprintf "SET-CONFIG %s %s" tenant
-      (config_to_yojson cfg |> Yojson.Safe.to_string)
-  | Add_rule r ->
-    Printf.sprintf "ADD-RULE %s %s" tenant
-      (rule_to_yojson r |> Yojson.Safe.to_string)
-  | Update_rule (idx, r) ->
-    Printf.sprintf "UPDATE-RULE %s %d %s" tenant idx
-      (rule_to_yojson r |> Yojson.Safe.to_string)
-  | Delete_rule idx -> Printf.sprintf "DELETE-RULE %s %d" tenant idx
-  | Status -> Printf.sprintf "STATUS %s" tenant
-
-let rejoin = String.concat ~sep:" "
-
-let deserialize_server_command : string -> (packed_server_command, string) Result.t =
-  fun line ->
-  match String.split line ~on:' ' with
-  | "REGISTER" :: tenant :: brand_parts ->
-    let brand =
-      match brand_parts with
-      | [] -> None
-      | _ -> Some (rejoin brand_parts)
-    in
-    Ok (Server_command { tenant; command = Register brand })
-  | [ "STATUS"; tenant ] ->
-    Ok (Server_command { tenant; command = Status })
-  | [ "GET-CONFIG"; tenant ] ->
-    Ok (Server_command { tenant; command = Get_config })
-  | "OPEN" :: tenant :: (_ :: _ as url_parts) ->
-    Ok (Server_command { tenant; command = Open (rejoin url_parts) })
-  | "TEST" :: tenant :: (_ :: _ as url_parts) ->
-    Ok (Server_command { tenant; command = Test (rejoin url_parts) })
-  | "OPEN-ON" :: tenant :: target :: (_ :: _ as url_parts) ->
-    Ok (Server_command { tenant; command = Open_on (target, rejoin url_parts) })
-  | "SET-CONFIG" :: tenant :: (_ :: _ as json_parts) ->
-    let* json = parse_json_string (rejoin json_parts) in
-    let* cfg = config_of_yojson json in
-    Ok (Server_command { tenant; command = Set_config cfg })
-  | "ADD-RULE" :: tenant :: (_ :: _ as json_parts) ->
-    let* json = parse_json_string (rejoin json_parts) in
-    let* r = rule_of_yojson json in
-    Ok (Server_command { tenant; command = Add_rule r })
-  | "UPDATE-RULE" :: tenant :: idx_str :: (_ :: _ as json_parts) ->
-    let* idx =
-      Int.of_string_opt idx_str
-      |> Result.of_option ~error:"UPDATE-RULE: invalid index"
-    in
-    let* json = parse_json_string (rejoin json_parts) in
-    let* r = rule_of_yojson json in
-    Ok (Server_command { tenant; command = Update_rule (idx, r) })
-  | [ "DELETE-RULE"; tenant; idx_str ] ->
-    let* idx =
-      Int.of_string_opt idx_str
-      |> Result.of_option ~error:"DELETE-RULE: invalid index"
-    in
-    Ok (Server_command { tenant; command = Delete_rule idx })
-  | _ -> Error (Printf.sprintf "unknown command: %s" line)
-
-(* -- Line protocol: responses *)
-
-let serialize_response : type a. a command -> (a, string) Result.t -> string =
- fun cmd resp ->
-  match resp with
-  | Error msg -> Printf.sprintf "ERR %s" msg
-  | Ok value ->
-    (match cmd with
-     | Register _ -> Printf.sprintf "OK %s" value
-     | Open _ ->
-       (match value with
-        | Local -> "LOCAL"
-        | Remote tid -> Printf.sprintf "REMOTE %s" tid)
-     | Open_on _ ->
-       (match value with
-        | Local -> "LOCAL"
-        | Remote tid -> Printf.sprintf "REMOTE %s" tid)
-     | Test _ ->
-       (match value with
-        | Match { tenant; rule_index } ->
-          Printf.sprintf "MATCH %s %d" tenant rule_index
-        | No_match { default_tenant } ->
-          Printf.sprintf "NOMATCH %s" default_tenant)
-     | Get_config ->
-       Printf.sprintf "CONFIG %s"
-         (config_to_yojson value |> Yojson.Safe.to_string)
-     | Set_config _ -> "OK"
-     | Add_rule _ -> "OK"
-     | Update_rule _ -> "OK"
-     | Delete_rule _ -> "OK"
-     | Status ->
-       Printf.sprintf "STATUS %s"
-         (status_info_to_yojson value |> Yojson.Safe.to_string))
-
-let deserialize_response :
-    type a. a command -> string -> (a, string) Result.t =
- fun cmd line ->
-  match (cmd, String.split line ~on:' ') with
-  | (_, "ERR" :: rest) -> Error (rejoin rest)
-  | (Register _, [ "OK"; tid ]) -> Ok tid
-  | (Set_config _, [ "OK" ]) -> Ok ()
-  | (Add_rule _, [ "OK" ]) -> Ok ()
-  | (Update_rule _, [ "OK" ]) -> Ok ()
-  | (Delete_rule _, [ "OK" ]) -> Ok ()
-  | (Open _, [ "LOCAL" ]) -> Ok Local
-  | (Open_on _, [ "LOCAL" ]) -> Ok Local
-  | (Open _, [ "REMOTE"; tid ]) -> Ok (Remote tid)
-  | (Open_on _, [ "REMOTE"; tid ]) -> Ok (Remote tid)
-  | (Test _, [ "MATCH"; tenant; idx_str ]) ->
-    let* idx =
-      Int.of_string_opt idx_str
-      |> Result.of_option ~error:"MATCH: invalid index"
-    in
-    Ok (Match { tenant; rule_index = idx })
-  | (Test _, [ "NOMATCH"; default_tenant ]) ->
-    Ok (No_match { default_tenant })
-  | (Get_config, "CONFIG" :: (_ :: _ as json_parts)) ->
-    let* json = parse_json_string (rejoin json_parts) in
-    let* cfg = config_of_yojson json in
-    Ok cfg
-  | (Status, "STATUS" :: (_ :: _ as json_parts)) ->
-    let* json = parse_json_string (rejoin json_parts) in
-    let* si = status_info_of_yojson json in
-    Ok si
-  | _ -> Error (Printf.sprintf "unrecognized response: %s" line)
-
-(* -- Line protocol: server push *)
-
-let serialize_push : type a. a server_push -> string =
- fun push ->
-  match push with
-  | Navigate url -> Printf.sprintf "NAVIGATE %s" url
-  | Config_updated (cfg, registered) ->
-    let json = `Assoc [
-      ("config", config_to_yojson cfg);
-      ("registered_tenants", `List (List.map registered ~f:(fun s -> `String s)));
-    ] in
-    Printf.sprintf "CONFIG_UPDATED %s" (Yojson.Safe.to_string json)
-
-let deserialize_push (line : string) : (packed_server_push, string) Result.t =
-  match String.split line ~on:' ' with
-  | "NAVIGATE" :: (_ :: _ as url_parts) ->
-    Ok (Push (Navigate (rejoin url_parts)))
-  | "CONFIG_UPDATED" :: (_ :: _ as json_parts) ->
-    let* json = parse_json_string (rejoin json_parts) in
-    let* cfg = config_of_yojson (Yojson.Safe.Util.member "config" json) in
-    let registered =
-      match Yojson.Safe.Util.member "registered_tenants" json with
-      | `List items ->
-        List.filter_map items ~f:(function
-          | `String s -> Some s
-          | _ -> None)
-      | _ -> []
-    in
-    Ok (Push (Config_updated (cfg, registered)))
-  | _ -> Error (Printf.sprintf "unknown push: %s" line)
 
 (* -- JSON wire types *)
 
@@ -462,9 +288,16 @@ module Wire = struct
     | Config_updated of { config : config; registered_tenants : string list }
   [@@deriving yojson]
 
-  type bridge_message =
-    | Response of response
-    | Push of push
+  type request = {
+    id : int;
+    command : command;
+    tenant : string option; [@default None]
+  }
+  [@@deriving yojson]
+
+  type server_message =
+    | Response of { id : int; response : response }
+    | Push of { id : int; push : push }
   [@@deriving yojson]
 end
 
@@ -512,40 +345,7 @@ let response_to_wire : type a. a command -> (a, string) Result.t -> Wire.respons
      | Delete_rule _ -> Ok_unit
      | Status -> Ok_status value)
 
-let response_of_wire : type a. a command -> Wire.response -> (a, string) Result.t =
- fun cmd wire ->
-  match wire with
-  | Err { message } -> Error message
-  | Ok_unit ->
-    (match cmd with
-     | Set_config _ -> Ok ()
-     | Add_rule _ -> Ok ()
-     | Update_rule _ -> Ok ()
-     | Delete_rule _ -> Ok ()
-     | _ -> Error "unexpected Ok_unit for this command")
-  | Ok_registered { tenant_id } ->
-    (match cmd with
-     | Register _ -> Ok tenant_id
-     | _ -> Error "unexpected Ok_registered for this command")
-  | Ok_route r ->
-    (match cmd with
-     | Open _ -> Ok r
-     | Open_on _ -> Ok r
-     | _ -> Error "unexpected Ok_route for this command")
-  | Ok_test t ->
-    (match cmd with
-     | Test _ -> Ok t
-     | _ -> Error "unexpected Ok_test for this command")
-  | Ok_config c ->
-    (match cmd with
-     | Get_config -> Ok c
-     | _ -> Error "unexpected Ok_config for this command")
-  | Ok_status s ->
-    (match cmd with
-     | Status -> Ok s
-     | _ -> Error "unexpected Ok_status for this command")
-
-(* -- JSON serialization: commands *)
+(* -- JSON serialization helpers *)
 
 let serialize_command_json : type a. a command -> Yojson.Safe.t =
  fun cmd -> command_to_wire cmd |> Wire.command_to_yojson
@@ -555,37 +355,26 @@ let deserialize_command_json (json : Yojson.Safe.t) :
   let* wire = Wire.command_of_yojson json in
   Ok (command_of_wire wire)
 
-(* -- JSON serialization: responses *)
-
-let serialize_response_json :
-    type a. a command -> (a, string) Result.t -> Yojson.Safe.t =
- fun cmd resp -> response_to_wire cmd resp |> Wire.response_to_yojson
-
-let deserialize_response_json :
-    type a. a command -> Yojson.Safe.t -> (a, string) Result.t =
- fun cmd json ->
-  match Wire.response_of_yojson json with
-  | Error e -> Error e
-  | Ok wire -> response_of_wire cmd wire
-
-(* -- Bridge message envelope *)
-
-let bridge_response_to_yojson :
-    type a. a command -> (a, string) Result.t -> Yojson.Safe.t =
- fun cmd resp ->
-  response_to_wire cmd resp
-  |> fun w -> Wire.bridge_message_to_yojson (Response w)
-
-let bridge_push_to_yojson (push : packed_server_push) : Yojson.Safe.t =
+let push_to_wire (push : packed_server_push) : Wire.push =
   match push with
-  | Push (Navigate url) ->
-    Wire.bridge_message_to_yojson (Push (Navigate { url }))
+  | Push (Navigate url) -> Navigate { url }
   | Push (Config_updated (cfg, registered)) ->
-    Wire.bridge_message_to_yojson (Push (Config_updated { config = cfg; registered_tenants = registered }))
+    Config_updated { config = cfg; registered_tenants = registered }
 
-let bridge_message_of_yojson (json : Yojson.Safe.t) :
-    (Wire.bridge_message, string) Result.t =
-  Wire.bridge_message_of_yojson json
+let serialize_server_message (msg : Wire.server_message) : string =
+  Wire.server_message_to_yojson msg |> Yojson.Safe.to_string
+
+let deserialize_server_message (s : string) :
+    (Wire.server_message, string) Result.t =
+  let* json = parse_json_string s in
+  Wire.server_message_of_yojson json
+
+let serialize_request (req : Wire.request) : string =
+  Wire.request_to_yojson req |> Yojson.Safe.to_string
+
+let deserialize_request (s : string) : (Wire.request, string) Result.t =
+  let* json = parse_json_string s in
+  Wire.request_of_yojson json
 
 (* -- Inline expect tests *)
 
@@ -601,73 +390,7 @@ let%expect_test "sample data" =
   in
   [%expect {||}]
 
-(* -- Line protocol: server commands *)
-
-let%expect_test "line: serialize register" =
-  print_endline (serialize_server_command { tenant = "host"; command = Register (Some "Google Chrome") });
-  [%expect {| REGISTER host Google Chrome |}]
-
-let%expect_test "line: serialize open" =
-  print_endline
-    (serialize_server_command
-       { tenant = "work"; command = Open "https://example.com" });
-  [%expect {| OPEN work https://example.com |}]
-
-let%expect_test "line: serialize open-on" =
-  print_endline
-    (serialize_server_command
-       { tenant = "host"; command = Open_on ("work", "https://example.com/page") });
-  [%expect {| OPEN-ON host work https://example.com/page |}]
-
-let%expect_test "line: serialize test" =
-  print_endline
-    (serialize_server_command { tenant = "work"; command = Test "https://test.com" });
-  [%expect {| TEST work https://test.com |}]
-
-let%expect_test "line: serialize get-config" =
-  print_endline (serialize_server_command { tenant = "host"; command = Get_config });
-  [%expect {| GET-CONFIG host |}]
-
-let%expect_test "line: serialize delete-rule" =
-  print_endline
-    (serialize_server_command { tenant = "host"; command = Delete_rule 3 });
-  [%expect {| DELETE-RULE host 3 |}]
-
-let%expect_test "line: serialize status" =
-  print_endline (serialize_server_command { tenant = "host"; command = Status });
-  [%expect {| STATUS host |}]
-
-let%expect_test "line: round-trip register" =
-  let line = serialize_server_command { tenant = "host"; command = Register (Some "Microsoft Edge") } in
-  (match deserialize_server_command line with
-   | Ok (Server_command { tenant; command = Register (Some brand) }) ->
-     printf "tenant=%s brand=%s\n" tenant brand
-   | _ -> print_endline "FAIL");
-  [%expect {| tenant=host brand=Microsoft Edge |}]
-
-let%expect_test "line: round-trip open with spaces in url" =
-  let sc =
-    { tenant = "work"; command = Open "https://example.com/search?q=hello world" }
-  in
-  let line = serialize_server_command sc in
-  (match deserialize_server_command line with
-   | Ok (Server_command { tenant; command = Open url }) ->
-     printf "tenant=%s url=%s\n" tenant url
-   | _ -> print_endline "FAIL");
-  [%expect {| tenant=work url=https://example.com/search?q=hello world |}]
-
-let%expect_test "line: round-trip open_on" =
-  let sc =
-    { tenant = "host"; command = Open_on ("work", "https://example.com/page") }
-  in
-  let line = serialize_server_command sc in
-  (match deserialize_server_command line with
-   | Ok (Server_command { tenant; command = Open_on (target, url) }) ->
-     printf "tenant=%s target=%s url=%s\n" tenant target url
-   | _ -> print_endline "FAIL");
-  [%expect {| tenant=host target=work url=https://example.com/page |}]
-
-let sample_config =
+let[@warning "-32"] sample_config =
   {
     listen = [ "127.0.0.1:7120"; "[::1]:7120" ];
     allowed_networks = default_allowed_networks;
@@ -685,141 +408,11 @@ let sample_config =
       { unmatched = "personal"; cooldown_seconds = 5; browser_launch_timeout = 10 };
   }
 
-let%expect_test "line: round-trip set_config" =
-  let line =
-    serialize_server_command { tenant = "host"; command = Set_config sample_config }
-  in
-  (match deserialize_server_command line with
-   | Ok (Server_command { tenant; command = Set_config cfg }) ->
-     printf "tenant=%s listen=%s rules=%d\n" tenant
-       (String.concat ~sep:"," cfg.listen)
-       (List.length cfg.rules)
-   | _ -> print_endline "FAIL");
-  [%expect {| tenant=host listen=127.0.0.1:7120,[::1]:7120 rules=1 |}]
-
-let sample_rule =
+let[@warning "-32"] sample_rule =
   { pattern = ".*[.]example[.]com"; target = "work"; enabled = true }
 
-let%expect_test "line: round-trip add_rule" =
-  let line =
-    serialize_server_command { tenant = "host"; command = Add_rule sample_rule }
-  in
-  (match deserialize_server_command line with
-   | Ok (Server_command { tenant; command = Add_rule r }) ->
-     printf "tenant=%s pattern=%s target=%s enabled=%b\n" tenant r.pattern
-       r.target r.enabled
-   | _ -> print_endline "FAIL");
-  [%expect {| tenant=host pattern=.*[.]example[.]com target=work enabled=true |}]
-
-let%expect_test "line: round-trip update_rule" =
-  let line =
-    serialize_server_command
-      { tenant = "host"; command = Update_rule (2, sample_rule) }
-  in
-  (match deserialize_server_command line with
-   | Ok (Server_command { tenant; command = Update_rule (idx, r) }) ->
-     printf "tenant=%s idx=%d pattern=%s\n" tenant idx r.pattern
-   | _ -> print_endline "FAIL");
-  [%expect {| tenant=host idx=2 pattern=.*[.]example[.]com |}]
-
-let%expect_test "line: round-trip delete_rule" =
-  let line =
-    serialize_server_command { tenant = "host"; command = Delete_rule 3 }
-  in
-  (match deserialize_server_command line with
-   | Ok (Server_command { tenant; command = Delete_rule idx }) ->
-     printf "tenant=%s idx=%d\n" tenant idx
-   | _ -> print_endline "FAIL");
-  [%expect {| tenant=host idx=3 |}]
-
-(* -- Line protocol: responses *)
-
-let%expect_test "line: response OK" =
-  print_endline (serialize_response (Register None) (Ok "myhost"));
-  [%expect {| OK myhost |}]
-
-let%expect_test "line: response LOCAL" =
-  print_endline (serialize_response (Open "https://x.com") (Ok Local));
-  [%expect {| LOCAL |}]
-
-let%expect_test "line: response REMOTE" =
-  print_endline (serialize_response (Open "https://x.com") (Ok (Remote "work")));
-  [%expect {| REMOTE work |}]
-
-let%expect_test "line: response MATCH" =
-  print_endline
-    (serialize_response (Test "https://x.com")
-       (Ok (Match { tenant = "work"; rule_index = 1 })));
-  [%expect {| MATCH work 1 |}]
-
-let%expect_test "line: response NOMATCH" =
-  print_endline
-    (serialize_response (Test "https://x.com")
-       (Ok (No_match { default_tenant = "personal" })));
-  [%expect {| NOMATCH personal |}]
-
-let%expect_test "line: response ERR" =
-  print_endline (serialize_response (Register None) (Error "something went wrong"));
-  [%expect {| ERR something went wrong |}]
-
-let%expect_test "line: round-trip response config" =
-  let cmd = Get_config in
-  let line = serialize_response cmd (Ok sample_config) in
-  (match deserialize_response cmd line with
-   | Ok cfg ->
-     printf "listen=%s rules=%d\n" (String.concat ~sep:"," cfg.listen) (List.length cfg.rules)
-   | _ -> print_endline "FAIL");
-  [%expect {| listen=127.0.0.1:7120,[::1]:7120 rules=1 |}]
-
-let sample_status =
+let[@warning "-32"] sample_status =
   { registered_tenants = [ "work"; "personal" ]; uptime_seconds = 3600 }
-
-let%expect_test "line: round-trip response status" =
-  let cmd = Status in
-  let line = serialize_response cmd (Ok sample_status) in
-  (match deserialize_response cmd line with
-   | Ok si ->
-     printf "uptime=%d tenants=%d\n" si.uptime_seconds
-       (List.length si.registered_tenants)
-   | _ -> print_endline "FAIL");
-  [%expect {| uptime=3600 tenants=2 |}]
-
-let%expect_test "line: round-trip response err with special chars" =
-  let cmd = Register None in
-  let line = serialize_response cmd (Error "fail: \"bad\" & <oops>") in
-  (match deserialize_response cmd line with
-   | Error msg -> printf "err=%s\n" msg
-   | _ -> print_endline "FAIL");
-  [%expect {| err=fail: "bad" & <oops> |}]
-
-(* -- Line protocol: server push *)
-
-let%expect_test "line: push navigate" =
-  print_endline (serialize_push (Navigate "https://example.com/path"));
-  [%expect {| NAVIGATE https://example.com/path |}]
-
-let%expect_test "line: round-trip push navigate with spaces" =
-  let line = serialize_push (Navigate "https://example.com/q=hello world") in
-  (match deserialize_push line with
-   | Ok (Push (Navigate url)) -> printf "url=%s\n" url
-   | _ -> print_endline "FAIL");
-  [%expect {| url=https://example.com/q=hello world |}]
-
-let%expect_test "line: round-trip push config_updated" =
-  let cfg : config = {
-    listen = ["127.0.0.1:7120"];
-    allowed_networks = ["127.0.0.0/8"];
-    tenants = [("work", { browser_cmd = None; label = "Work"; color = "#ff0000"; brand = None })];
-    rules = [];
-    defaults = { unmatched = "local"; cooldown_seconds = 5; browser_launch_timeout = 10 };
-  } in
-  let registered = ["work"; "personal"] in
-  let line = serialize_push (Config_updated (cfg, registered)) in
-  (match deserialize_push line with
-   | Ok (Push (Config_updated (c, r))) ->
-     printf "tenants=%d registered=%d\n" (List.length c.tenants) (List.length r)
-   | _ -> print_endline "FAIL");
-  [%expect {| tenants=1 registered=2 |}]
 
 (* -- JSON: commands *)
 
@@ -890,75 +483,61 @@ let%expect_test "json: round-trip delete_rule" =
    | _ -> print_endline "FAIL");
   [%expect {| idx=7 |}]
 
-(* -- JSON: responses *)
+(* -- JSON: request *)
 
-let%expect_test "json: response ok" =
-  let json = serialize_response_json (Register None) (Ok "myhost") in
-  print_endline (Yojson.Safe.to_string json);
-  [%expect {| ["Ok_registered",{"tenant_id":"myhost"}] |}]
+let%expect_test "json: request with tenant" =
+  let req : Wire.request = { id = 1; command = Register { brand = Some "Edge"; address = None; name = None }; tenant = Some "mypc" } in
+  let s = serialize_request req in
+  print_endline s;
+  (match deserialize_request s with
+   | Ok r -> printf "id=%d tenant=%s\n" r.id (Option.value r.tenant ~default:"(none)")
+   | Error msg -> printf "FAIL: %s\n" msg);
+  [%expect {|
+    {"id":1,"command":["Register",{"brand":"Edge"}],"tenant":"mypc"}
+    id=1 tenant=mypc
+    |}]
 
-let%expect_test "json: response local" =
-  let json = serialize_response_json (Open "https://x.com") (Ok Local) in
-  print_endline (Yojson.Safe.to_string json);
-  [%expect {| ["Ok_route",["Local"]] |}]
+let%expect_test "json: request without tenant" =
+  let req : Wire.request = { id = 2; command = Get_config; tenant = None } in
+  let s = serialize_request req in
+  print_endline s;
+  (match deserialize_request s with
+   | Ok r -> printf "id=%d tenant=%s\n" r.id (Option.value r.tenant ~default:"(none)")
+   | Error msg -> printf "FAIL: %s\n" msg);
+  [%expect {|
+    {"id":2,"command":["Get_config"]}
+    id=2 tenant=(none)
+    |}]
 
-let%expect_test "json: response remote" =
-  let json =
-    serialize_response_json (Open "https://x.com") (Ok (Remote "work"))
-  in
-  print_endline (Yojson.Safe.to_string json);
-  [%expect {| ["Ok_route",["Remote","work"]] |}]
+(* -- JSON: server_message *)
 
-let%expect_test "json: response match" =
-  let json =
-    serialize_response_json (Test "https://x.com")
-      (Ok (Match { tenant = "work"; rule_index = 2 }))
-  in
-  print_endline (Yojson.Safe.to_string json);
-  [%expect {| ["Ok_test",["Match",{"tenant":"work","rule_index":2}]] |}]
-
-let%expect_test "json: response nomatch" =
-  let json =
-    serialize_response_json (Test "https://x.com")
-      (Ok (No_match { default_tenant = "personal" }))
-  in
-  print_endline (Yojson.Safe.to_string json);
-  [%expect {| ["Ok_test",["No_match",{"default_tenant":"personal"}]] |}]
-
-let%expect_test "json: response error" =
-  let json = serialize_response_json (Register None) (Error "bad request") in
-  print_endline (Yojson.Safe.to_string json);
-  [%expect {| ["Err",{"message":"bad request"}] |}]
-
-let%expect_test "json: round-trip response config" =
-  let cmd = Get_config in
-  let json = serialize_response_json cmd (Ok sample_config) in
-  (match deserialize_response_json cmd json with
-   | Ok cfg -> printf "listen=%s\n" (String.concat ~sep:"," cfg.listen)
-   | _ -> print_endline "FAIL");
-  [%expect {| listen=127.0.0.1:7120,[::1]:7120 |}]
-
-let%expect_test "json: round-trip response status" =
-  let cmd = Status in
-  let json = serialize_response_json cmd (Ok sample_status) in
-  (match deserialize_response_json cmd json with
-   | Ok si -> printf "uptime=%d\n" si.uptime_seconds
-   | _ -> print_endline "FAIL");
-  [%expect {| uptime=3600 |}]
-
-(* -- JSON: bridge messages *)
-
-let%expect_test "json: bridge push round-trip" =
-  let json = bridge_push_to_yojson (Push (Navigate "https://example.com")) in
-  print_endline (Yojson.Safe.to_string json);
-  (match bridge_message_of_yojson json with
-   | Ok (Wire.Push (Wire.Navigate { url })) -> printf "url=%s\n" url
+let%expect_test "json: server_message response" =
+  let msg = Wire.Response { id = 1; response = Ok_registered { tenant_id = "mypc" } } in
+  let s = serialize_server_message msg in
+  print_endline s;
+  (match deserialize_server_message s with
+   | Ok (Response { id; response = Ok_registered { tenant_id } }) ->
+     printf "id=%d tenant_id=%s\n" id tenant_id
    | _ -> print_endline "FAIL");
   [%expect {|
-    ["Push",["Navigate",{"url":"https://example.com"}]]
-    url=https://example.com |}]
+    ["Response",{"id":1,"response":["Ok_registered",{"tenant_id":"mypc"}]}]
+    id=1 tenant_id=mypc
+    |}]
 
-let%expect_test "json: bridge push config_updated round-trip" =
+let%expect_test "json: server_message push" =
+  let msg = Wire.Push { id = 0; push = Navigate { url = "https://example.com" } } in
+  let s = serialize_server_message msg in
+  print_endline s;
+  (match deserialize_server_message s with
+   | Ok (Push { id; push = Navigate { url } }) ->
+     printf "id=%d url=%s\n" id url
+   | _ -> print_endline "FAIL");
+  [%expect {|
+    ["Push",{"id":0,"push":["Navigate",{"url":"https://example.com"}]}]
+    id=0 url=https://example.com
+    |}]
+
+let%expect_test "json: server_message push config_updated" =
   let cfg : config = {
     listen = ["127.0.0.1:7120"];
     allowed_networks = ["127.0.0.0/8"];
@@ -966,19 +545,33 @@ let%expect_test "json: bridge push config_updated round-trip" =
     rules = [];
     defaults = { unmatched = "local"; cooldown_seconds = 5; browser_launch_timeout = 10 };
   } in
-  let json = bridge_push_to_yojson (Push (Config_updated (cfg, ["work"]))) in
-  (match bridge_message_of_yojson json with
-   | Ok (Wire.Push (Wire.Config_updated { config = c; registered_tenants = r })) ->
-     printf "tenants=%d registered=%d\n" (List.length c.tenants) (List.length r)
+  let msg = Wire.Push { id = 0; push = Config_updated { config = cfg; registered_tenants = ["work"] } } in
+  let s = serialize_server_message msg in
+  (match deserialize_server_message s with
+   | Ok (Push { id; push = Config_updated { config = c; registered_tenants = r } }) ->
+     printf "id=%d tenants=%d registered=%d\n" id (List.length c.tenants) (List.length r)
    | _ -> print_endline "FAIL");
-  [%expect {| tenants=1 registered=1 |}]
+  [%expect {| id=0 tenants=1 registered=1 |}]
 
-let%expect_test "json: bridge response round-trip" =
-  let json = bridge_response_to_yojson (Register None) (Ok "myhost") in
-  (match bridge_message_of_yojson json with
-   | Ok (Wire.Response (Wire.Ok_registered { tenant_id })) -> printf "registered=%s\n" tenant_id
+let%expect_test "json: server_message error response" =
+  let msg = Wire.Response { id = 5; response = Err { message = "not found" } } in
+  let s = serialize_server_message msg in
+  (match deserialize_server_message s with
+   | Ok (Response { id; response = Err { message } }) ->
+     printf "id=%d err=%s\n" id message
    | _ -> print_endline "FAIL");
-  [%expect {| registered=myhost |}]
+  [%expect {| id=5 err=not found |}]
+
+let%expect_test "json: response config round-trip" =
+  let wire_resp = response_to_wire Get_config (Ok sample_config) in
+  let msg = Wire.Response { id = 42; response = wire_resp } in
+  let s = serialize_server_message msg in
+  (match deserialize_server_message s with
+   | Ok (Response { id; response = Ok_config cfg }) ->
+     printf "id=%d listen=%s rules=%d\n" id
+       (String.concat ~sep:"," cfg.listen) (List.length cfg.rules)
+   | _ -> print_endline "FAIL");
+  [%expect {| id=42 listen=127.0.0.1:7120,[::1]:7120 rules=1 |}]
 
 (* -- Error handling *)
 
@@ -990,15 +583,3 @@ let%expect_test "deserialize: invalid json string" =
     error=invalid JSON: Line 1, bytes 0-15:
     Invalid token 'not valid json{'
     |}]
-
-let%expect_test "deserialize: unknown command" =
-  (match deserialize_server_command "BOGUS host" with
-   | Error msg -> printf "error=%s\n" msg
-   | Ok _ -> print_endline "UNEXPECTED OK");
-  [%expect {| error=unknown command: BOGUS host |}]
-
-let%expect_test "deserialize: empty line" =
-  (match deserialize_server_command "" with
-   | Error msg -> printf "error=%s\n" msg
-   | Ok _ -> print_endline "UNEXPECTED OK");
-  [%expect {| error=unknown command: |}]

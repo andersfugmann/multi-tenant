@@ -67,7 +67,8 @@ type event =
 
 type state = {
   native_port : native_port option;
-  pending_callbacks : (Protocol.Wire.response -> unit) list;
+  next_id : int;
+  pending : (Protocol.Wire.response -> unit) Map.M(Int).t;
   tenant_names : (string * string * bool) list;
   self_tenant_id : string option;
   debug_logging : bool;
@@ -82,7 +83,7 @@ let push ev = push_event (Some ev)
 
 (* -- State operations (pure) *)
 
-let initial_state = { native_port = None; pending_callbacks = []; tenant_names = []; self_tenant_id = None; debug_logging = false }
+let initial_state = { native_port = None; next_id = 1; pending = Map.empty (module Int); tenant_names = []; self_tenant_id = None; debug_logging = false }
 
 let debug (state : state) (msg : string) : unit =
   match state.debug_logging with
@@ -105,21 +106,25 @@ let update_badge (connected : bool) : unit =
       "icons/icon48_disconnected.png"
       "icons/icon128_disconnected.png"
 
-let send_to_bridge (state : state) (json : Yojson.Safe.t)
+let send_request (state : state) (cmd : Protocol.Wire.command)
     (on_response : Protocol.Wire.response -> unit) : state =
   match state.native_port with
   | None ->
     log "No native port connected";
     state
   | Some p ->
+    let id = state.next_id in
+    let json = Protocol.Wire.command_to_yojson cmd in
     Chrome_api.Port.post_message_json p (json_to_string json);
-    { state with pending_callbacks = state.pending_callbacks @ [ on_response ] }
+    { state with
+      next_id = id + 1;
+      pending = Map.set state.pending ~key:id ~data:on_response }
 
 let send_command (state : state) (cmd : Protocol.packed_command)
     (on_response : Protocol.Wire.response -> unit) : state =
   let (Protocol.Command c) = cmd in
-  let json = Protocol.serialize_command_json c in
-  send_to_bridge state json on_response
+  let wire_cmd = Protocol.command_to_wire c in
+  send_request state wire_cmd on_response
 
 (* -- Connection management *)
 
@@ -140,12 +145,11 @@ let connect_with_settings (port : native_port) (tenant_name : string) (daemon_ho
     (Option.value brand ~default:"(none)")
     (Option.value name ~default:"(default)")
     (Option.value address ~default:"(default)"));
-  let state = { native_port = Some port; pending_callbacks = []; tenant_names = []; self_tenant_id = None; debug_logging } in
-  let register_wire : Protocol.Wire.command =
+  let state = { native_port = Some port; next_id = 1; pending = Map.empty (module Int); tenant_names = []; self_tenant_id = None; debug_logging } in
+  let register_cmd : Protocol.Wire.command =
     Register { brand; address; name }
   in
-  let json = Protocol.Wire.command_to_yojson register_wire in
-  send_to_bridge state json (fun wire_resp ->
+  send_request state register_cmd (fun wire_resp ->
     match wire_resp with
     | Protocol.Wire.Ok_registered { tenant_id } ->
       push (Self_registered { tenant_id })
@@ -176,7 +180,7 @@ let connect (_state : state) : state =
                daemon_port = find "daemon_port";
                debug_logging = String.equal (find "debug_logging") "true";
              }));
-    { native_port = Some p; pending_callbacks = []; tenant_names = []; self_tenant_id = None; debug_logging = false }
+    { native_port = Some p; next_id = 1; pending = Map.empty (module Int); tenant_names = []; self_tenant_id = None; debug_logging = false }
   | exception exn ->
     log (Printf.sprintf "Failed to connect: %s" (Exn.to_string exn));
     initial_state
@@ -193,39 +197,44 @@ let response_type_name (resp : Protocol.Wire.response) : string =
   | Ok_unit -> "Ok_unit"
   | Err _ -> "Err"
 
+let handle_push (state : state) (p : Protocol.Wire.push) : state =
+  match p with
+  | Navigate { url } ->
+    log (Printf.sprintf "Received NAVIGATE push: %s" url);
+    create_tab url;
+    state
+  | Registered { tenant_id } ->
+    log (Printf.sprintf "Re-registered as tenant: %s" tenant_id);
+    push (Self_registered { tenant_id });
+    state
+  | Config_updated { config = cfg; registered_tenants } ->
+    log (Printf.sprintf "Config push: %d tenants, %d registered"
+      (List.length cfg.tenants) (List.length registered_tenants));
+    let registered_set = Set.of_list (module String) registered_tenants in
+    let tenants = List.map cfg.tenants ~f:(fun (id, tc) ->
+      (id, tc.Protocol.label, Set.mem registered_set id)) in
+    push (Refresh_menus { tenants });
+    state
+
 let handle_bridge_message (state : state) (raw : string) : state =
   match json_of_string raw with
   | Error msg ->
     log (Printf.sprintf "Failed to parse bridge JSON: %s" msg);
     state
   | Ok json ->
-    (match Protocol.bridge_message_of_yojson json with
-     | Ok (Protocol.Wire.Response wire_resp) ->
-       log (Printf.sprintf "Bridge response: %s (pending callbacks: %d)"
-         (response_type_name wire_resp) (List.length state.pending_callbacks));
-       (match state.pending_callbacks with
-        | [] ->
-          log "Received response with no pending callback";
+    (match Protocol.Wire.server_message_of_yojson json with
+     | Ok (Response { id; response }) ->
+       log (Printf.sprintf "Bridge response: %s id=%d (pending: %d)"
+         (response_type_name response) id (Map.length state.pending));
+       (match Map.find state.pending id with
+        | None ->
+          log (Printf.sprintf "Orphan response for id=%d" id);
           state
-        | cb :: rest ->
-          cb wire_resp;
-          { state with pending_callbacks = rest })
-     | Ok (Protocol.Wire.Push (Protocol.Wire.Navigate { url })) ->
-       log (Printf.sprintf "Received NAVIGATE push: %s" url);
-       create_tab url;
-       state
-     | Ok (Protocol.Wire.Push (Protocol.Wire.Registered { tenant_id })) ->
-       log (Printf.sprintf "Re-registered as tenant: %s" tenant_id);
-       push (Self_registered { tenant_id });
-       state
-     | Ok (Protocol.Wire.Push (Protocol.Wire.Config_updated { config = cfg; registered_tenants })) ->
-       log (Printf.sprintf "Config push: %d tenants, %d registered"
-         (List.length cfg.tenants) (List.length registered_tenants));
-       let registered_set = Set.of_list (module String) registered_tenants in
-       let tenants = List.map cfg.tenants ~f:(fun (id, tc) ->
-         (id, tc.Protocol.label, Set.mem registered_set id)) in
-       push (Refresh_menus { tenants });
-       state
+        | Some cb ->
+          cb response;
+          { state with pending = Map.remove state.pending id })
+     | Ok (Push { id = _; push = p }) ->
+       handle_push state p
      | Error msg ->
        log (Printf.sprintf "Failed to parse bridge message: %s" msg);
        state)
@@ -241,13 +250,14 @@ let handle_navigation (state : state) (url : string) (tab_id : int) : state =
        debug state (Printf.sprintf "→ Open %s" url);
        send_command state (Command (Open url)) (fun wire_resp ->
            let elapsed = Chrome_api.performance_now () -. t0 in
-           match Protocol.response_of_wire (Open url) wire_resp with
-           | Ok Local ->
+           match wire_resp with
+           | Protocol.Wire.Ok_route Local ->
              debug state (Printf.sprintf "← Local (%.1f ms) %s" elapsed url)
-           | Ok (Remote tid) ->
+           | Ok_route (Remote tid) ->
              debug state (Printf.sprintf "← Remote %s (%.1f ms) %s" tid elapsed url);
              Chrome_api.Tabs.remove tab_id
-           | Error msg -> log (Printf.sprintf "Open error: %s" msg)))
+           | Err { message } -> log (Printf.sprintf "Open error: %s" message)
+           | _ -> log "Unexpected response for Open"))
 
 let handle_context_menu (state : state) (menu_id : string)
     (link_url : string) (page_url : string) (tab_id : int option) : state =
@@ -285,13 +295,14 @@ let handle_context_menu (state : state) (menu_id : string)
      | true -> state
      | false ->
        send_command state (Command (Test url)) (fun wire_resp ->
-           match Protocol.response_of_wire (Test url) wire_resp with
-           | Ok (Match { rule_index; _ }) ->
+           match wire_resp with
+           | Protocol.Wire.Ok_test (Match { rule_index; _ }) ->
              push (Delete_rule_at { index = rule_index })
-           | Ok (No_match _) ->
+           | Ok_test (No_match _) ->
              log (Printf.sprintf "No rule matches %s" url)
-           | Error msg ->
-             log (Printf.sprintf "Test error: %s" msg)))
+           | Err { message } ->
+             log (Printf.sprintf "Test error: %s" message)
+           | _ -> log "Unexpected response for Test"))
   | _ -> state
 
 let handle_popup_query (state : state) (json : Yojson.Safe.t)
@@ -305,12 +316,14 @@ let handle_popup_query (state : state) (json : Yojson.Safe.t)
        state
      | true ->
        send_command state (Command Status) (fun wire_resp ->
-           match Protocol.response_of_wire Status wire_resp with
-           | Ok info ->
+           match wire_resp with
+           | Protocol.Wire.Ok_status info ->
              respond (`Assoc [ ("connected", `Bool true);
                                ("registered_tenants", `List (List.map info.registered_tenants ~f:(fun s -> `String s))) ])
-           | Error msg ->
-             respond (`Assoc [ ("connected", `Bool false); ("error", `String msg) ])))
+           | Err { message } ->
+             respond (`Assoc [ ("connected", `Bool false); ("error", `String message) ])
+           | _ ->
+             respond (`Assoc [ ("connected", `Bool false); ("error", `String "unexpected response") ])))
   | Ok "query_tenants" ->
     (match connected with
      | false ->
@@ -346,16 +359,16 @@ let handle_popup_query (state : state) (json : Yojson.Safe.t)
             ])
        in
        let state = send_command state (Command Status) (fun wire_resp ->
-           (match Protocol.response_of_wire Status wire_resp with
-            | Ok info -> status_ref := Some info
-            | Error _ -> ());
+           (match wire_resp with
+            | Protocol.Wire.Ok_status info -> status_ref := Some info
+            | _ -> ());
            pending := !pending - 1;
            try_respond ())
        in
        send_command state (Command Get_config) (fun wire_resp ->
-           (match Protocol.response_of_wire Get_config wire_resp with
-            | Ok cfg -> config_ref := Some cfg
-            | Error _ -> ());
+           (match wire_resp with
+            | Protocol.Wire.Ok_config cfg -> config_ref := Some cfg
+            | _ -> ());
            pending := !pending - 1;
            try_respond ()))
   | Ok "send_to" ->
@@ -375,9 +388,10 @@ let handle_popup_query (state : state) (json : Yojson.Safe.t)
        state
      | false ->
        send_command state (Command (Open_on (target, url))) (fun wire_resp ->
-           match Protocol.response_of_wire (Open_on (target, url)) wire_resp with
-           | Ok _ -> respond (`Assoc [ ("ok", `Bool true) ])
-           | Error msg -> respond (`Assoc [ ("error", `String msg) ])))
+           match wire_resp with
+           | Protocol.Wire.Ok_route _ -> respond (`Assoc [ ("ok", `Bool true) ])
+           | Err { message } -> respond (`Assoc [ ("error", `String message) ])
+           | _ -> respond (`Assoc [ ("error", `String "unexpected response") ])))
   | Ok "delete_matching_rule" ->
     let url =
       match string_field json "url" with
@@ -390,14 +404,16 @@ let handle_popup_query (state : state) (json : Yojson.Safe.t)
        state
      | false ->
        send_command state (Command (Test url)) (fun wire_resp ->
-           match Protocol.response_of_wire (Test url) wire_resp with
-           | Ok (Match { rule_index; _ }) ->
+           match wire_resp with
+           | Protocol.Wire.Ok_test (Match { rule_index; _ }) ->
              push (Delete_rule_at { index = rule_index });
              respond (`Assoc [ ("ok", `Bool true) ])
-           | Ok (No_match _) ->
+           | Ok_test (No_match _) ->
              respond (`Assoc [ ("error", `String "No matching rule") ])
-           | Error msg ->
-             respond (`Assoc [ ("error", `String msg) ])))
+           | Err { message } ->
+             respond (`Assoc [ ("error", `String message) ])
+           | _ ->
+             respond (`Assoc [ ("error", `String "unexpected response") ])))
   | Ok "reconnect" ->
     let state = connect state in
     respond (`Assoc [ ("connected", `Bool (is_connected state)) ]);
@@ -422,10 +438,12 @@ let handle_popup_query (state : state) (json : Yojson.Safe.t)
          { pattern; target; enabled = true }
        in
        send_command state (Command (Add_rule rule)) (fun wire_resp ->
-           match Protocol.response_of_wire (Add_rule rule) wire_resp with
-           | Ok () -> respond (`Assoc [ ("ok", `Bool true) ])
-           | Error msg ->
-             respond (`Assoc [ ("error", `String msg) ])))
+           match wire_resp with
+           | Protocol.Wire.Ok_unit -> respond (`Assoc [ ("ok", `Bool true) ])
+           | Err { message } ->
+             respond (`Assoc [ ("error", `String message) ])
+           | _ ->
+             respond (`Assoc [ ("error", `String "unexpected response") ])))
   | Ok "query_status" ->
     send_command state (Command Status) (fun wire_resp ->
         respond
@@ -454,11 +472,13 @@ let handle_popup_query (state : state) (json : Yojson.Safe.t)
           state
         | Ok cfg ->
           send_command state (Command (Set_config cfg)) (fun wire_resp ->
-              match Protocol.response_of_wire (Set_config cfg) wire_resp with
-              | Ok () ->
+              match wire_resp with
+              | Protocol.Wire.Ok_unit ->
                 respond (`Assoc [ ("ok", `Bool true) ])
-              | Error msg ->
-                respond (`Assoc [ ("error", `String msg) ]))))
+              | Err { message } ->
+                respond (`Assoc [ ("error", `String message) ])
+              | _ ->
+                respond (`Assoc [ ("error", `String "unexpected response") ]))))
   | Ok other ->
     log (Printf.sprintf "Unknown popup action: %s" other);
     respond (`Assoc [ ("error", `String "unknown action") ]);
@@ -491,11 +511,13 @@ let setup_context_menus (tenants : (string * string * bool) list) (self_id : str
 
 let handle_delete_rule_at (state : state) (index : int) : state =
   send_command state (Command (Delete_rule index)) (fun wire_resp ->
-      match Protocol.response_of_wire (Delete_rule index) wire_resp with
-      | Ok () ->
+      match wire_resp with
+      | Protocol.Wire.Ok_unit ->
         log (Printf.sprintf "Deleted rule at index %d" index)
-      | Error msg ->
-        log (Printf.sprintf "Delete rule error: %s" msg))
+      | Err { message } ->
+        log (Printf.sprintf "Delete rule error: %s" message)
+      | _ ->
+        log "Unexpected response for Delete_rule")
 
 let handle_event (state : state) (event : event) : state =
   match event with

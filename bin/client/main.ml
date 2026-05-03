@@ -229,13 +229,45 @@ let send_command_cli :
   let flow =
     connect_to_daemon ~sw net addr
   in
-  let server_cmd : a Protocol.server_command = { tenant; command = cmd } in
-  let line = Protocol.serialize_server_command server_cmd in
-  Eio.Flow.copy_string (line ^ "\n") flow;
+  let wire_cmd = Protocol.command_to_wire cmd in
+  let req : Protocol.Wire.request = { id = 1; command = wire_cmd; tenant = Some tenant } in
+  Eio.Flow.copy_string (Protocol.serialize_request req ^ "\n") flow;
   let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
   let response_line = Eio.Buf_read.line reader in
-  Protocol.deserialize_response cmd response_line
-  |> format_response cmd
+  match Protocol.deserialize_server_message response_line with
+  | Ok (Response { id = _; response }) ->
+    (match response with
+     | Err { message } -> format_response cmd (Error message)
+     | Ok_registered { tenant_id } ->
+       (match cmd with
+        | Register _ -> format_response cmd (Ok tenant_id)
+        | _ -> Printf.sprintf "Unexpected response: Ok_registered")
+     | Ok_route r ->
+       (match cmd with
+        | Open _ -> format_response cmd (Ok r)
+        | Open_on _ -> format_response cmd (Ok r)
+        | _ -> Printf.sprintf "Unexpected response: Ok_route")
+     | Ok_test t ->
+       (match cmd with
+        | Test _ -> format_response cmd (Ok t)
+        | _ -> Printf.sprintf "Unexpected response: Ok_test")
+     | Ok_config c ->
+       (match cmd with
+        | Get_config -> format_response cmd (Ok c)
+        | _ -> Printf.sprintf "Unexpected response: Ok_config")
+     | Ok_status s ->
+       (match cmd with
+        | Status -> format_response cmd (Ok s)
+        | _ -> Printf.sprintf "Unexpected response: Ok_status")
+     | Ok_unit ->
+       (match cmd with
+        | Set_config _ -> format_response cmd (Ok ())
+        | Add_rule _ -> format_response cmd (Ok ())
+        | Update_rule _ -> format_response cmd (Ok ())
+        | Delete_rule _ -> format_response cmd (Ok ())
+        | _ -> Printf.sprintf "Unexpected response: Ok_unit"))
+  | Ok (Push _) -> "Unexpected push message"
+  | Error msg -> Printf.sprintf "Response parse error: %s" msg
 
 (* -- CLI register: stay connected, print pushes *)
 
@@ -244,29 +276,34 @@ let run_register ~net ~addr ~tenant =
   let flow =
     connect_to_daemon ~sw net addr
   in
-  let server_cmd : string Protocol.server_command =
-    { tenant; command = Register None }
-  in
-  let line = Protocol.serialize_server_command server_cmd in
-  Eio.Flow.copy_string (line ^ "\n") flow;
+  let req : Protocol.Wire.request = { id = 1; command = Register { brand = None; address = None; name = None }; tenant = Some tenant } in
+  Eio.Flow.copy_string (Protocol.serialize_request req ^ "\n") flow;
   let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
   let first_line = Eio.Buf_read.line reader in
-  (match Protocol.deserialize_response (Register None) first_line with
-   | Ok tid -> printf "Registered as %s\n%!" tid
-   | Error msg ->
-     eprintf "Registration failed: %s\n%!" msg;
+  (match Protocol.deserialize_server_message first_line with
+   | Ok (Response { id = _; response = Ok_registered { tenant_id } }) ->
+     printf "Registered as %s\n%!" tenant_id
+   | Ok (Response { id = _; response = Err { message } }) ->
+     eprintf "Registration failed: %s\n%!" message;
+     Stdlib.exit 1
+   | _ ->
+     eprintf "Unexpected registration response\n%!";
      Stdlib.exit 1);
   let rec read_loop () =
     match Eio.Buf_read.line reader with
-    | push_line ->
-      (match Protocol.deserialize_push push_line with
-       | Ok (Push (Navigate url)) ->
+    | line ->
+      (match Protocol.deserialize_server_message line with
+       | Ok (Push { id = _; push = Navigate { url } }) ->
          printf "NAVIGATE %s\n%!" url
-       | Ok (Push (Config_updated (cfg, registered))) ->
+       | Ok (Push { id = _; push = Config_updated { config = cfg; registered_tenants } }) ->
          printf "CONFIG_UPDATED tenants=%d registered=%d\n%!"
-           (List.length cfg.tenants) (List.length registered)
+           (List.length cfg.tenants) (List.length registered_tenants)
+       | Ok (Push { id = _; push = Registered { tenant_id } }) ->
+         printf "RE-REGISTERED %s\n%!" tenant_id
+       | Ok (Response _) ->
+         eprintf "Unexpected response in register stream\n%!"
        | Error msg ->
-         eprintf "Push parse error: %s\n%!" msg);
+         eprintf "Parse error: %s\n%!" msg);
       read_loop ()
     | exception End_of_file ->
       eprintf "Server disconnected\n%!"
@@ -302,107 +339,14 @@ let write_native_message sink (json : Yojson.Safe.t) : unit =
   Eio.Flow.copy_string (Cstruct.to_string len_buf) sink;
   Eio.Flow.copy_string data sink
 
-(* -- Bridge: send a command to daemon, return JSON response *)
-
-let bridge_send_command :
-    type a.
-    net:_ Eio.Net.ty Eio.Resource.t ->
-    tenant:string ->
-    addr:Protocol.address ->
-    a Protocol.command ->
-    Protocol.Wire.response =
- fun ~net ~tenant ~addr cmd ->
-  match
-    Eio.Switch.run @@ fun sw ->
-    let flow =
-      connect_to_daemon ~sw net addr
-    in
-    let server_cmd : a Protocol.server_command = { tenant; command = cmd } in
-    let line = Protocol.serialize_server_command server_cmd in
-    Eio.Flow.copy_string (line ^ "\n") flow;
-    let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
-    let response_line = Eio.Buf_read.line reader in
-    Protocol.deserialize_response cmd response_line
-    |> Protocol.response_to_wire cmd
-  with
-  | wire -> wire
-  | exception exn ->
-    Protocol.Wire.Err { message = Exn.to_string exn }
-
-(* -- Bridge: command fiber *)
-
-let bridge_command_fiber ~net ~tenant ~addr ~stdin_flow
-    ~(write_out : Yojson.Safe.t -> unit) : unit =
-  let rec loop () =
-    match read_native_message stdin_flow with
-    | None -> ()
-    | Some json ->
-      let wire_response =
-        match Protocol.deserialize_command_json json with
-        | Error msg -> Protocol.Wire.Err { message = msg }
-        | Ok (Command cmd) -> bridge_send_command ~net ~tenant ~addr cmd
-      in
-      let bridge_msg = Protocol.Wire.(bridge_message_to_yojson (Response wire_response)) in
-      write_out bridge_msg;
-      loop ()
-  in
-  loop ()
-
-(* -- Bridge: push fiber (reconnect on disconnect) *)
-
-let bridge_push_fiber ~net ~tenant ~brand ~addr
-    ~(write_out : Yojson.Safe.t -> unit)
-    ~(on_registered : string -> unit) : unit =
-  let rec connect_loop () =
-    match
-      Eio.Switch.run @@ fun sw ->
-      let flow =
-        connect_to_daemon ~sw net addr
-      in
-      let server_cmd : string Protocol.server_command =
-        { tenant; command = Register brand }
-      in
-      let line = Protocol.serialize_server_command server_cmd in
-      Eio.Flow.copy_string (line ^ "\n") flow;
-      let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
-      let first_line = Eio.Buf_read.line reader in
-      (match Protocol.deserialize_response (Register brand) first_line with
-       | Ok tid -> on_registered tid
-       | Error msg ->
-         eprintf "Registration failed: %s\n%!" msg;
-         failwith msg);
-      let rec read_loop () =
-        let push_line = Eio.Buf_read.line reader in
-        (match Protocol.deserialize_push push_line with
-         | Ok push ->
-           let msg = Protocol.bridge_push_to_yojson push in
-           write_out msg
-         | Error _msg -> ());
-        read_loop ()
-      in
-      read_loop ()
-    with
-    | () -> ()
-    | exception exn ->
-      eprintf "Bridge push error: %s\n%!" (Exn.to_string exn);
-      on_registered tenant;
-      Eio_unix.sleep 2.0;
-      connect_loop ()
-  in
-  connect_loop ()
-
-(* -- Bridge mode entry point *)
+(* -- Bridge mode: transparent relay *)
 
 let run_bridge env =
   let net = Eio.Stdenv.net env in
   let default_tenant = Unix.gethostname () in
-  let stdout_mutex = Eio.Mutex.create () in
   let stdout_flow = Eio.Stdenv.stdout env in
   let stdin_flow = Eio.Stdenv.stdin env in
-  let write_out json =
-    Eio.Mutex.use_rw ~protect:true stdout_mutex (fun () ->
-        write_native_message stdout_flow json)
-  in
+  let stdout_stream = Eio.Stream.create 64 in
   (* Read first message from extension: Register with brand and optional overrides *)
   let (brand, tenant, addr_override) =
     match read_native_message stdin_flow with
@@ -412,41 +356,92 @@ let run_bridge env =
          let tenant = Option.value name ~default:default_tenant in
          (brand, tenant, address)
        | _ ->
-         let resp = Protocol.Wire.(bridge_message_to_yojson
-           (Response (Err { message = "expected Register as first message" }))) in
-         write_out resp;
+         let err_msg = Protocol.Wire.Response { id = 0; response = Err { message = "expected Register as first message" } } in
+         Eio.Stream.add stdout_stream (Protocol.Wire.server_message_to_yojson err_msg);
          (None, default_tenant, None))
     | None -> (None, default_tenant, None)
   in
   let default_addr = Printf.sprintf "127.0.0.1:%d" Protocol.default_port in
   let addr = Protocol.parse_address
     (Option.value addr_override ~default:default_addr) in
-  let (registered, resolve_registered) = Eio.Promise.create () in
-  let on_registered =
-    let resolved = ref false in
-    fun tid ->
-      match !resolved with
-      | false ->
-        resolved := true;
-        let resp = Protocol.bridge_response_to_yojson (Register brand) (Ok tid) in
-        write_out resp;
-        Eio.Promise.resolve resolve_registered ()
-      | true ->
-        (* Re-registration after daemon restart: send as push *)
-        let msg = Protocol.Wire.(bridge_message_to_yojson
-          (Push (Registered { tenant_id = tid }))) in
-        write_out msg
+  (* stdout writer fiber: single writer ensures no interleaving *)
+  let write_stdout () =
+    let rec loop () =
+      let json = Eio.Stream.take stdout_stream in
+      write_native_message stdout_flow json;
+      loop ()
+    in
+    loop ()
   in
-  Eio.Fiber.both
-    (fun () ->
-      Eio.Promise.await registered;
-      bridge_command_fiber ~net ~tenant ~addr
-        ~stdin_flow
-        ~write_out)
-    (fun () ->
-      bridge_push_fiber ~net ~tenant ~brand ~addr
-        ~write_out
-        ~on_registered)
+  (* TCP relay with reconnection *)
+  let relay () =
+    let rec connect_loop () =
+      match
+        Eio.Switch.run @@ fun sw ->
+        let flow = connect_to_daemon ~sw net addr in
+        (* Send Register to server *)
+        let register_req : Protocol.Wire.request = {
+          id = 1;
+          command = Register { brand; address = None; name = Some tenant };
+          tenant = Some tenant;
+        } in
+        Eio.Flow.copy_string (Protocol.serialize_request register_req ^ "\n") flow;
+        let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
+        (* Read registration response *)
+        let first_line = Eio.Buf_read.line reader in
+        (match Protocol.deserialize_server_message first_line with
+         | Ok (Response { id; response = Ok_registered _ } as msg) ->
+           Eio.Stream.add stdout_stream (Protocol.Wire.server_message_to_yojson msg);
+           ignore (id : int)
+         | Ok (Response { id = _; response = Err { message } }) ->
+           eprintf "Registration failed: %s\n%!" message;
+           failwith message
+         | _ ->
+           eprintf "Unexpected registration response\n%!";
+           failwith "unexpected registration response");
+        (* Two forwarding fibers *)
+        Eio.Fiber.both
+          (fun () ->
+            (* TCP → stdout: forward all server messages *)
+            let rec read_tcp () =
+              let line = Eio.Buf_read.line reader in
+              (match Protocol.parse_json_string line with
+               | Ok json -> Eio.Stream.add stdout_stream json
+               | Error msg -> eprintf "Bridge: bad JSON from server: %s\n%!" msg);
+              read_tcp ()
+            in
+            read_tcp ())
+          (fun () ->
+            (* stdin → TCP: forward extension commands *)
+            let next_id = ref 2 in
+            let rec read_stdin () =
+              match read_native_message stdin_flow with
+              | None -> ()
+              | Some json ->
+                (* Extension sends Wire.command, we wrap as Wire.request *)
+                let id = !next_id in
+                next_id := id + 1;
+                let req_json = `Assoc [
+                  ("id", `Int id);
+                  ("command", json);
+                ] in
+                Eio.Flow.copy_string (Yojson.Safe.to_string req_json ^ "\n") flow;
+                read_stdin ()
+            in
+            read_stdin ())
+      with
+      | () -> ()
+      | exception exn ->
+        eprintf "Bridge error: %s, reconnecting in 2s…\n%!" (Exn.to_string exn);
+        (* Send re-registration push so extension knows we reconnected *)
+        let re_reg = Protocol.Wire.Push { id = 0; push = Registered { tenant_id = tenant } } in
+        Eio.Stream.add stdout_stream (Protocol.Wire.server_message_to_yojson re_reg);
+        Eio_unix.sleep 2.0;
+        connect_loop ()
+    in
+    connect_loop ()
+  in
+  Eio.Fiber.both write_stdout relay
 
 (* -- Main *)
 

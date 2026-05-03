@@ -102,26 +102,6 @@ type packed_server_push = Push : 'a server_push -> packed_server_push
 
 type packed_command = Command : 'a command -> packed_command
 
-type 'a server_command = { tenant : tenant_id; command : 'a command }
-
-type packed_server_command =
-  | Server_command : 'a server_command -> packed_server_command
-
-(** {1 Line protocol — server commands} *)
-
-val serialize_server_command : 'a server_command -> string
-val deserialize_server_command : string -> (packed_server_command, string) Result.t
-
-(** {1 Line protocol -- responses} *)
-
-val serialize_response : 'a command -> ('a, string) Result.t -> string
-val deserialize_response : 'a command -> string -> ('a, string) Result.t
-
-(** {1 Line protocol — server push} *)
-
-val serialize_push : 'a server_push -> string
-val deserialize_push : string -> (packed_server_push, string) Result.t
-
 (** {1 JSON wire types} *)
 
 module Wire : sig
@@ -154,9 +134,16 @@ module Wire : sig
     | Config_updated of { config : config; registered_tenants : string list }
   [@@deriving yojson]
 
-  type bridge_message =
-    | Response of response
-    | Push of push
+  type request = {
+    id : int;
+    command : command;
+    tenant : string option; [@default None]
+  }
+  [@@deriving yojson]
+
+  type server_message =
+    | Response of { id : int; response : response }
+    | Push of { id : int; push : push }
   [@@deriving yojson]
 end
 
@@ -165,26 +152,26 @@ end
 val command_to_wire : 'a command -> Wire.command
 val command_of_wire : Wire.command -> packed_command
 val response_to_wire : 'a command -> ('a, string) Result.t -> Wire.response
-val response_of_wire : 'a command -> Wire.response -> ('a, string) Result.t
 
-(** {1 JSON serialization -- commands} *)
+(** {1 JSON serialization — commands} *)
 
 val serialize_command_json : 'a command -> Yojson.Safe.t
 val deserialize_command_json : Yojson.Safe.t -> (packed_command, string) Result.t
 
-(** {1 JSON serialization -- responses} *)
+(** {1 JSON serialization — pushes} *)
 
-val serialize_response_json : 'a command -> ('a, string) Result.t -> Yojson.Safe.t
+val push_to_wire : packed_server_push -> Wire.push
 
-val deserialize_response_json :
-  'a command -> Yojson.Safe.t -> ('a, string) Result.t
+(** {1 JSON serialization — server messages} *)
+
+val serialize_server_message : Wire.server_message -> string
+val deserialize_server_message : string -> (Wire.server_message, string) Result.t
+
+(** {1 JSON serialization — requests} *)
+
+val serialize_request : Wire.request -> string
+val deserialize_request : string -> (Wire.request, string) Result.t
 
 (** {1 JSON helpers} *)
 
 val parse_json_string : string -> (Yojson.Safe.t, string) Result.t
-
-(** {1 Bridge message} *)
-
-val bridge_response_to_yojson : 'a command -> ('a, string) Result.t -> Yojson.Safe.t
-val bridge_push_to_yojson : packed_server_push -> Yojson.Safe.t
-val bridge_message_of_yojson : Yojson.Safe.t -> (Wire.bridge_message, string) Result.t
