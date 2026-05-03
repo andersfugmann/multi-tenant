@@ -35,7 +35,7 @@ type state = {
   config : Protocol.config;
   config_path : string;
   registry : string Eio.Stream.t Map.M(String).t;
-  starting : starting_tenant Map.M(String).t;
+  starting : (string * starting_tenant) list;
   cooldowns : cooldown_entry list;
   start_time : float;
 }
@@ -191,7 +191,7 @@ let deliver_url (state : state) (target : string) (url : string)
     Eio.Stream.add stream push_line;
     (state, Eio.Promise.create_resolved (Ok (Protocol.Remote target)))
   | None ->
-    match Map.find state.starting target with
+    match List.Assoc.find state.starting ~equal:String.equal target with
     | Some sentinel ->
       (match List.exists sentinel.pending ~f:(fun pd -> String.equal pd.url url) with
        | true ->
@@ -200,7 +200,7 @@ let deliver_url (state : state) (target : string) (url : string)
        | false ->
          let (promise, resolver) = Eio.Promise.create () in
          let pending = { url; target; reply = resolver } :: sentinel.pending in
-         let starting = Map.set state.starting ~key:target ~data:{ pending } in
+         let starting = List.Assoc.add state.starting ~equal:String.equal target { pending } in
          printf "[url-router] queued URL for starting tenant %s: %s\n%!" target url;
          ({ state with starting }, promise))
     | None ->
@@ -215,7 +215,7 @@ let deliver_url (state : state) (target : string) (url : string)
        | Some cmd ->
          let (promise, resolver) = Eio.Promise.create () in
          let sentinel = { pending = [ { url; target; reply = resolver } ] } in
-         let starting = Map.set state.starting ~key:target ~data:sentinel in
+         let starting = List.Assoc.add state.starting ~equal:String.equal target sentinel in
          launch_browser cmd;
          let timeout = Float.of_int state.config.defaults.browser_launch_timeout in
          Eio.Fiber.fork ~sw (fun () ->
@@ -434,7 +434,7 @@ let rec coordinator_loop (state : state) (inbox : coordinator_msg Eio.Stream.t)
          let state = { state with registry } in
          (* Flush pending deliveries if tenant was starting *)
          let state =
-           match Map.find state.starting tenant with
+           match List.Assoc.find state.starting ~equal:String.equal tenant with
            | None -> state
            | Some sentinel ->
              List.iter sentinel.pending ~f:(fun pd ->
@@ -442,7 +442,7 @@ let rec coordinator_loop (state : state) (inbox : coordinator_msg Eio.Stream.t)
                Eio.Stream.add push_stream push_line;
                Eio.Promise.resolve pd.reply (Ok (Protocol.Remote tenant));
                printf "[url-router] delivered pending URL to %s: %s\n%!" tenant pd.url);
-             let starting = Map.remove state.starting tenant in
+             let starting = List.Assoc.remove state.starting ~equal:String.equal tenant in
              { state with starting }
          in
          (* Update or auto-add tenant config with brand *)
@@ -475,14 +475,14 @@ let rec coordinator_loop (state : state) (inbox : coordinator_msg Eio.Stream.t)
       printf "[url-router] config reloaded from disk\n%!";
       { state with config }
     | Launch_timeout { tenant } ->
-      (match Map.find state.starting tenant with
+      (match List.Assoc.find state.starting ~equal:String.equal tenant with
        | None -> state
        | Some sentinel ->
          List.iter sentinel.pending ~f:(fun pd ->
            let msg = Printf.sprintf "tenant %s failed to start within timeout" tenant in
            Eio.Promise.resolve pd.reply (Error msg);
            printf "[url-router] timeout: failed to deliver URL to %s: %s\n%!" tenant pd.url);
-         let starting = Map.remove state.starting tenant in
+         let starting = List.Assoc.remove state.starting ~equal:String.equal tenant in
          printf "[url-router] tenant %s start timed out\n%!" tenant;
          { state with starting })
   in
@@ -570,7 +570,7 @@ let () =
       config;
       config_path;
       registry = Map.empty (module String);
-      starting = Map.empty (module String);
+      starting = [];
       cooldowns = [];
       start_time = Unix.gettimeofday ();
     }
