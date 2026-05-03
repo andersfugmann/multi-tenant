@@ -6,8 +6,7 @@ open! Stdio
 let socket_path () =
   match Sys.getenv "ALLOY_SOCKET" with
   | Some path -> path
-  | None ->
-    "/run/user/" ^ Int.to_string (Unix.getuid ()) ^ "/alloy.sock"
+  | None -> Protocol.default_socket_path ()
 
 (* -- Hostname detection *)
 
@@ -348,24 +347,15 @@ let run_bridge env =
         ~write_out
         ~on_registered:resolve_once)
 
-(* -- Detect if running as native messaging host *)
-
-let is_terminal () = Unix.isatty Unix.stdin
-
 (* -- Main *)
 
 let () =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
   let argv = Sys.get_argv () in
-  (* Detect bridge mode: explicit --bridge flag, chrome-extension:// origin arg,
-     or stdin is not a terminal *)
+  (* Detect bridge mode: explicit --bridge flag or chrome-extension:// origin arg *)
   let { mode; socket; name } =
     match Array.length argv with
-    | 1 ->
-      (match is_terminal () with
-       | true -> parse_cli argv
-       | false -> { mode = Bridge; socket = None; name = None })
     | 2 when String.is_prefix (Array.get argv 1) ~prefix:"chrome-extension://" ->
       { mode = Bridge; socket = None; name = None }
     | _ -> parse_cli argv

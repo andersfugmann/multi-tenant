@@ -1,6 +1,11 @@
 open !Base
 open !Stdio
 
+(* -- Shared paths *)
+
+let default_socket_path () =
+  "/run/user/" ^ Int.to_string (Unix.getuid ()) ^ "/alloy.sock"
+
 (* -- Core data types *)
 
 type tenant_id = string [@@deriving yojson]

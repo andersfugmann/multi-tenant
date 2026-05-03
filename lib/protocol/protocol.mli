@@ -1,5 +1,9 @@
 (** Multi-tenant URL routing protocol types and serialization. *)
 
+(** {1 Shared paths} *)
+
+val default_socket_path : unit -> string
+
 (** {1 Core data types} *)
 
 type tenant_id = string [@@deriving yojson]

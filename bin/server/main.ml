@@ -1,9 +1,6 @@
 open! Base
 open! Stdio
 
-let default_socket_path () =
-  "/run/user/" ^ Int.to_string (Unix.getuid ()) ^ "/alloy.sock"
-
 (* -- State *)
 
 type cooldown_entry = { key : string; expires : float }
@@ -51,7 +48,7 @@ type coordinator_msg =
 
 let default_config () : Protocol.config =
   {
-    socket = default_socket_path ();
+    socket = Protocol.default_socket_path ();
     tenants = [];
     rules = [];
     defaults =
