@@ -45,7 +45,7 @@ let to_string_list = function
 (* -- Send page to tenant -- *)
 
 let send_page_to (tenant : string) : unit =
-  Page_util.query_active_tab ~on_result:(fun url _tab_id ->
+  Page_util.query_active_tab ~on_result:(fun url tab_id ->
     Page_util.send_message
       (`Assoc [ ("action", `String "send_to");
                 ("target", `String tenant);
@@ -54,7 +54,9 @@ let send_page_to (tenant : string) : unit =
         match result with
         | Ok json ->
           (match member "ok" json with
-           | `Bool true -> set_footer ~cls:"success" (Printf.sprintf "Sent to %s" tenant)
+           | `Bool true ->
+             Chrome_api.Tabs.remove tab_id;
+             Dom_html.window##close
            | _ ->
              let msg = member "error" json |> to_string_j in
              set_footer ~cls:"error" (Printf.sprintf "Error: %s" msg))

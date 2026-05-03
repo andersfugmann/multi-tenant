@@ -263,6 +263,12 @@ and reset_tenant_form () : unit =
 
 and render_rules () : unit =
   let rules = !config.rules in
+  let resolve_label target =
+    match List.Assoc.find !config.tenants ~equal:String.equal target with
+    | Some tc ->
+      (match String.is_empty tc.label with true -> target | false -> tc.label)
+    | None -> target
+  in
   match List.is_empty rules with
   | true ->
     Page_util.set_html rule_list_el
@@ -286,7 +292,7 @@ and render_rules () : unit =
           on_class i
           (Page_util.escape_html r.pattern)
           (Page_util.escape_html r.pattern)
-          (Page_util.escape_html r.target)
+          (Page_util.escape_html (resolve_label r.target))
           i i i i)
       |> String.concat
     in
