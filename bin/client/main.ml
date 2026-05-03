@@ -332,39 +332,45 @@ let bridge_command_fiber ~net ~tenant ~sock_path ~stdin_flow
   in
   loop ()
 
-(* -- Bridge: push fiber (connect once, no retry) *)
+(* -- Bridge: push fiber (reconnect on disconnect) *)
 
 let bridge_push_fiber ~net ~tenant ~brand ~sock_path
     ~(write_out : Yojson.Safe.t -> unit)
     ~(on_registered : string -> unit) : unit =
-  match
-    Eio.Switch.run @@ fun sw ->
-    let flow =
-      Eio.Net.connect ~sw net (`Unix sock_path)
-    in
-    let server_cmd : string Protocol.server_command =
-      { tenant; command = Register brand }
-    in
-    let line = Protocol.serialize_server_command server_cmd in
-    Eio.Flow.copy_string (line ^ "\n") flow;
-    let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
-    let first_line = Eio.Buf_read.line reader in
-    (match Protocol.deserialize_response (Register brand) first_line with
-     | Ok tid -> on_registered tid
-     | Error _msg -> on_registered tenant);
-    let rec read_loop () =
-      let push_line = Eio.Buf_read.line reader in
-      (match Protocol.deserialize_push push_line with
-       | Ok push ->
-         let msg = Protocol.bridge_push_to_yojson push in
-         write_out msg
-       | Error _msg -> ());
+  let rec connect_loop () =
+    match
+      Eio.Switch.run @@ fun sw ->
+      let flow =
+        Eio.Net.connect ~sw net (`Unix sock_path)
+      in
+      let server_cmd : string Protocol.server_command =
+        { tenant; command = Register brand }
+      in
+      let line = Protocol.serialize_server_command server_cmd in
+      Eio.Flow.copy_string (line ^ "\n") flow;
+      let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
+      let first_line = Eio.Buf_read.line reader in
+      (match Protocol.deserialize_response (Register brand) first_line with
+       | Ok tid -> on_registered tid
+       | Error _msg -> on_registered tenant);
+      let rec read_loop () =
+        let push_line = Eio.Buf_read.line reader in
+        (match Protocol.deserialize_push push_line with
+         | Ok push ->
+           let msg = Protocol.bridge_push_to_yojson push in
+           write_out msg
+         | Error _msg -> ());
+        read_loop ()
+      in
       read_loop ()
-    in
-    read_loop ()
-  with
-  | () -> ()
-  | exception _exn -> on_registered tenant
+    with
+    | () -> ()
+    | exception _exn ->
+      on_registered tenant;
+      Eio_unix.sleep 2.0;
+      connect_loop ()
+  in
+  connect_loop ()
 
 (* -- Bridge mode entry point *)
 
@@ -395,16 +401,20 @@ let run_bridge env =
   in
   let sock_path = Option.value sock_override ~default:(Protocol.default_socket_path ()) in
   let (registered, resolve_registered) = Eio.Promise.create () in
-  let resolve_once =
+  let on_registered =
     let resolved = ref false in
     fun tid ->
       match !resolved with
-      | true -> ()
       | false ->
         resolved := true;
         let resp = Protocol.bridge_response_to_yojson (Register brand) (Ok tid) in
         write_out resp;
         Eio.Promise.resolve resolve_registered ()
+      | true ->
+        (* Re-registration after daemon restart: send as push *)
+        let msg = Protocol.Wire.(bridge_message_to_yojson
+          (Push (Registered { tenant_id = tid }))) in
+        write_out msg
   in
   Eio.Fiber.both
     (fun () ->
@@ -415,7 +425,7 @@ let run_bridge env =
     (fun () ->
       bridge_push_fiber ~net ~tenant ~brand ~sock_path
         ~write_out
-        ~on_registered:resolve_once)
+        ~on_registered)
 
 (* -- Main *)
 

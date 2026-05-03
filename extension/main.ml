@@ -204,6 +204,10 @@ let handle_bridge_message (state : state) (raw : string) : state =
        log (Printf.sprintf "Received NAVIGATE push: %s" url);
        create_tab url;
        state
+     | Ok (Protocol.Wire.Push (Protocol.Wire.Registered { tenant_id })) ->
+       log (Printf.sprintf "Re-registered as tenant: %s" tenant_id);
+       push (Self_registered { tenant_id });
+       state
      | Error msg ->
        log (Printf.sprintf "Failed to parse bridge message: %s" msg);
        state)

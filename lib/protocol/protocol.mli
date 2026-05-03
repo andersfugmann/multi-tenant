@@ -127,7 +127,10 @@ module Wire : sig
     | Err of { message : string }
   [@@deriving yojson]
 
-  type push = Navigate of { url : string } [@@deriving yojson]
+  type push =
+    | Navigate of { url : string }
+    | Registered of { tenant_id : string }
+  [@@deriving yojson]
 
   type bridge_message =
     | Response of response
