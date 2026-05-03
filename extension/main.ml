@@ -438,8 +438,8 @@ let handle_popup_query (state : state) (json : Yojson.Safe.t)
 
 let setup_context_menus (tenants : string list) : unit =
   remove_all_context_menus (fun () ->
-    create_context_menu ~id:"open_in" ~title:"Open link in…" ~contexts:[ "link" ];
-    create_context_menu ~id:"send_to" ~title:"Send page…" ~contexts:[ "page" ];
+    create_context_menu ~id:"open_in" ~title:"Open link in" ~contexts:[ "link" ];
+    create_context_menu ~id:"send_to" ~title:"Send page" ~contexts:[ "page" ];
     List.iter tenants ~f:(fun tid ->
       create_child_context_menu
         ~id:(Printf.sprintf "open_in:%s" tid) ~parent_id:"open_in"
@@ -447,7 +447,7 @@ let setup_context_menus (tenants : string list) : unit =
       create_child_context_menu
         ~id:(Printf.sprintf "send_to:%s" tid) ~parent_id:"send_to"
         ~title:tid ~contexts:[ "page" ]);
-    create_context_menu ~id:"add_rule" ~title:"Add rule…" ~contexts:[ "page" ];
+    create_context_menu ~id:"add_rule" ~title:"Add rule" ~contexts:[ "page" ];
     create_context_menu ~id:"delete_rule" ~title:"Delete matching rule" ~contexts:[ "page" ])
 
 let handle_delete_rule_at (state : state) (index : int) : state =
