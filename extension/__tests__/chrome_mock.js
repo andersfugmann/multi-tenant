@@ -38,6 +38,7 @@ function createMock() {
     tabs: {
       create: jest.fn(),
       remove: jest.fn(),
+      query: jest.fn((_query, cb) => cb([{ url: "https://example.com", id: 1 }])),
     },
     storage: {
       local: {

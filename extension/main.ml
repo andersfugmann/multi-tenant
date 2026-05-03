@@ -258,33 +258,103 @@ let handle_popup_query (state : state) (json : Yojson.Safe.t)
   let connected = is_connected state in
   match string_field json "action" with
   | Ok "get_status" ->
-    respond
-      (`Assoc
-         [
-           ("connected", `Bool connected);
-           ( "info",
-             `String
-               (match connected with
-                | true -> "Native messaging host connected"
-                | false -> "Not connected to native host") );
-         ]);
-    state
-  | Ok "query_status" ->
-    send_command state (Command Status) (fun wire_resp ->
-        respond
-          (`Assoc
-             [
-               ("connected", `Bool connected);
-               ("data", Protocol.Wire.response_to_yojson wire_resp);
-             ]))
-  | Ok "query_config" ->
-    send_command state (Command Get_config) (fun wire_resp ->
-        respond
-          (`Assoc
-             [
-               ("connected", `Bool connected);
-               ("data", Protocol.Wire.response_to_yojson wire_resp);
-             ]))
+    (match connected with
+     | false ->
+       respond (`Assoc [ ("connected", `Bool false) ]);
+       state
+     | true ->
+       send_command state (Command Status) (fun wire_resp ->
+           match Protocol.response_of_wire Status wire_resp with
+           | Ok info ->
+             respond (`Assoc [ ("connected", `Bool true);
+                               ("registered_tenants", `List (List.map info.registered_tenants ~f:(fun s -> `String s))) ])
+           | Error msg ->
+             respond (`Assoc [ ("connected", `Bool false); ("error", `String msg) ])))
+  | Ok "query_tenants" ->
+    (match connected with
+     | false ->
+       respond (`Assoc [ ("registered_tenants", `List []); ("tenants", `Assoc []) ]);
+       state
+     | true ->
+       let status_ref = ref None in
+       let config_ref = ref None in
+       let pending = ref 2 in
+       let try_respond () =
+         match !pending > 0 with
+         | true -> ()
+         | false ->
+           let registered =
+             match !status_ref with
+             | Some info -> info.Protocol.registered_tenants
+             | None -> []
+           in
+           let tenants =
+             match !config_ref with
+             | Some cfg -> cfg.Protocol.tenants
+             | None -> []
+           in
+           respond (`Assoc [
+             ("registered_tenants", `List (List.map registered ~f:(fun s -> `String s)));
+             ("tenants", `Assoc (List.map tenants ~f:(fun (id, tc) ->
+               (id, `Assoc [
+                 ("label", `String tc.Protocol.label);
+                 ("brand", match tc.brand with Some b -> `String b | None -> `Null);
+               ]))))
+           ])
+       in
+       let state = send_command state (Command Status) (fun wire_resp ->
+           (match Protocol.response_of_wire Status wire_resp with
+            | Ok info -> status_ref := Some info
+            | Error _ -> ());
+           pending := !pending - 1;
+           try_respond ())
+       in
+       send_command state (Command Get_config) (fun wire_resp ->
+           (match Protocol.response_of_wire Get_config wire_resp with
+            | Ok cfg -> config_ref := Some cfg
+            | Error _ -> ());
+           pending := !pending - 1;
+           try_respond ()))
+  | Ok "send_to" ->
+    let target =
+      match string_field json "target" with
+      | Ok s -> s
+      | Error _ -> ""
+    in
+    let url =
+      match string_field json "url" with
+      | Ok s -> s
+      | Error _ -> ""
+    in
+    (match String.is_empty target || String.is_empty url with
+     | true ->
+       respond (`Assoc [ ("error", `String "target and url required") ]);
+       state
+     | false ->
+       send_command state (Command (Open_on (target, url))) (fun wire_resp ->
+           match Protocol.response_of_wire (Open_on (target, url)) wire_resp with
+           | Ok _ -> respond (`Assoc [ ("ok", `Bool true) ])
+           | Error msg -> respond (`Assoc [ ("error", `String msg) ])))
+  | Ok "delete_matching_rule" ->
+    let url =
+      match string_field json "url" with
+      | Ok s -> s
+      | Error _ -> ""
+    in
+    (match String.is_empty url with
+     | true ->
+       respond (`Assoc [ ("error", `String "url required") ]);
+       state
+     | false ->
+       send_command state (Command (Test url)) (fun wire_resp ->
+           match Protocol.response_of_wire (Test url) wire_resp with
+           | Ok (Match { rule_index; _ }) ->
+             push (Delete_rule_at { index = rule_index });
+             respond (`Assoc [ ("ok", `Bool true) ])
+           | Ok (No_match _) ->
+             respond (`Assoc [ ("error", `String "No matching rule") ])
+           | Error msg ->
+             respond (`Assoc [ ("error", `String msg) ])))
   | Ok "reconnect" ->
     let state = connect state in
     respond (`Assoc [ ("connected", `Bool (is_connected state)) ]);
@@ -313,6 +383,22 @@ let handle_popup_query (state : state) (json : Yojson.Safe.t)
            | Ok () -> respond (`Assoc [ ("ok", `Bool true) ])
            | Error msg ->
              respond (`Assoc [ ("error", `String msg) ])))
+  | Ok "query_status" ->
+    send_command state (Command Status) (fun wire_resp ->
+        respond
+          (`Assoc
+             [
+               ("connected", `Bool connected);
+               ("data", Protocol.Wire.response_to_yojson wire_resp);
+             ]))
+  | Ok "query_config" ->
+    send_command state (Command Get_config) (fun wire_resp ->
+        respond
+          (`Assoc
+             [
+               ("connected", `Bool connected);
+               ("data", Protocol.Wire.response_to_yojson wire_resp);
+             ]))
   | Ok "set_config" ->
     (match Yojson.Safe.Util.member "config" json with
      | `Null ->

@@ -30,6 +30,9 @@ let create_tab (url : string) : unit =
 let get_extension_url (path : string) : string =
   Chrome_api.Runtime.get_url path
 
+let query_active_tab ~(on_result : string -> int -> unit) : unit =
+  Chrome_api.Tabs.query_active ~on_result
+
 let validate_regexp (pattern : string) : (unit, string) Result.t =
   match Regexp.regexp pattern with
   | _ -> Ok ()

@@ -152,6 +152,20 @@ module Tabs = struct
 
   let remove (tab_id : int) : unit =
     call tabs "remove" [| inject tab_id |]
+
+  let query_active ~(on_result : string -> int -> unit) : unit =
+    let query = js_obj [ ("active", inject Js._true); ("currentWindow", inject Js._true) ] in
+    let cb = Js.wrap_callback (fun (tabs_arr : _ Js.t) ->
+      let len : int = Js.Unsafe.get tabs_arr (Js.string "length") in
+      match len > 0 with
+      | true ->
+        let tab : _ Js.t = Js.Unsafe.get tabs_arr 0 in
+        let url : Js.js_string Js.t = Js.Unsafe.get tab (Js.string "url") in
+        let tab_id : int = Js.Unsafe.get tab (Js.string "id") in
+        on_result (Js.to_string url) tab_id
+      | false -> ())
+    in
+    call tabs "query" [| inject query; inject cb |]
 end
 
 (* ── Windows ─────────────────────────────────────────────────────── *)

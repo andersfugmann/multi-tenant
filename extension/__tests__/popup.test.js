@@ -18,16 +18,6 @@ afterEach(() => {
 });
 
 describe("popup messages", () => {
-  test("get_status returns connected state", async () => {
-    const response = await sendPopupMessage(mock.listeners, {
-      action: "get_status",
-    });
-
-    expect(response).toHaveProperty("connected", true);
-    expect(response).toHaveProperty("info");
-    expect(response.info).toContain("connected");
-  });
-
   test("get_status returns disconnected after port disconnect", async () => {
     const { triggerPortDisconnect } = require("./chrome_mock");
     triggerPortDisconnect(mock.ports[0]);

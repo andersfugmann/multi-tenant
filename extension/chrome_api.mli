@@ -25,6 +25,7 @@ end
 module Tabs : sig
   val create_url : string -> unit
   val remove : int -> unit
+  val query_active : on_result:(string -> int -> unit) -> unit
 end
 
 module Windows : sig
