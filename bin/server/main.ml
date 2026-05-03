@@ -167,7 +167,7 @@ let check_and_prune_cooldowns cooldowns ~now ~key =
 
 (* -- Launch browser process (fire-and-forget) *)
 
-let launch_browser ~sw:_ cmd =
+let launch_browser cmd =
   let dev_null = Unix.openfile "/dev/null" [ Unix.O_RDWR ] 0o000 in
   let args = String.split ~on:' ' cmd |> Array.of_list in
   let pid = Unix.create_process args.(0) args dev_null dev_null dev_null in
@@ -208,7 +208,7 @@ let deliver_url state target url ~sw ~clock ~inbox =
          let (promise, resolver) = Eio.Promise.create () in
          let sentinel = { pending = [ { url; target; reply = resolver } ] } in
          let starting = List.Assoc.add state.starting ~equal:String.equal target sentinel in
-         launch_browser ~sw cmd;
+         launch_browser cmd;
          let timeout = Float.of_int state.config.defaults.browser_launch_timeout in
          Eio.Fiber.fork ~sw (fun () ->
            Eio.Time.sleep clock timeout;
