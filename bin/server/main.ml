@@ -1,10 +1,10 @@
 open Base
 open Stdio
 
-let default_socket_path () : string =
+let default_socket_path () =
   "/run/user/" ^ Int.to_string (Unix.getuid ()) ^ "/url-router.sock"
 
-let browser_cmd_of_brand (brand : string option) : string option =
+let browser_cmd_of_brand brand =
   Option.bind brand ~f:(fun raw ->
     let b = String.lowercase raw in
     match String.is_substring b ~substring:"edge" with
@@ -68,20 +68,20 @@ let default_config () : Protocol.config =
 
 (* -- Config loading / saving *)
 
-let rec mkdir_p (path : string) : unit =
+let rec mkdir_p path =
   match Stdlib.Sys.file_exists path with
   | true -> ()
   | false ->
     mkdir_p (Stdlib.Filename.dirname path);
     (try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
 
-let save_config_to_path (config_path : string) (config : Protocol.config) : unit =
+let save_config_to_path config_path config =
   mkdir_p (Stdlib.Filename.dirname config_path);
   let json = Protocol.config_to_yojson config in
   let content = Yojson.Safe.pretty_to_string json in
   Out_channel.write_all config_path ~data:(content ^ "\n")
 
-let load_config (path : string) : (Protocol.config, string) Result.t =
+let load_config path =
   match Stdlib.Sys.file_exists path with
   | true ->
     let content = In_channel.read_all path in
@@ -97,14 +97,14 @@ let load_config (path : string) : (Protocol.config, string) Result.t =
          (Exn.to_string exn));
     Ok config
 
-let config_mtime (path : string) : float option =
+let config_mtime path =
   match Unix.stat path with
   | stat -> Some stat.Unix.st_mtime
   | exception Unix.Unix_error _ -> None
 
 (* -- Config file watcher (polling) *)
 
-let config_watcher config_path (inbox : coordinator_msg Eio.Stream.t) clock =
+let config_watcher config_path inbox clock =
   let rec loop last_mtime =
     Eio.Time.sleep clock 2.0;
     let current_mtime = config_mtime config_path in
@@ -123,7 +123,7 @@ let config_watcher config_path (inbox : coordinator_msg Eio.Stream.t) clock =
 
 (* -- Rule evaluation *)
 
-let compile_regex (pattern : string) : (Re.re, string) Result.t =
+let compile_regex pattern =
   match Re.compile (Re.Pcre.re pattern) with
   | regex -> Ok regex
   | exception exn ->
@@ -179,10 +179,7 @@ let launch_browser cmd =
 
 (* -- Deliver URL to tenant (idempotent, may defer) *)
 
-let deliver_url (state : state) (target : string) (url : string)
-    ~(sw : Eio.Switch.t) ~(clock : _ Eio.Time.clock)
-    ~(inbox : coordinator_msg Eio.Stream.t) :
-    state * (Protocol.route_result, string) Result.t Eio.Promise.t =
+let deliver_url state target url ~sw ~clock ~inbox =
   match Map.find state.registry target with
   | Some stream ->
     let push_line = Protocol.serialize_push (Navigate url) in
@@ -224,9 +221,7 @@ let deliver_url (state : state) (target : string) (url : string)
 
 (* -- Command handlers *)
 
-let handle_open (state : state) (tenant : string) (url : string)
-    ~sw ~clock ~inbox :
-    state * (Protocol.route_result, string) Result.t Eio.Promise.t =
+let handle_open state tenant url ~sw ~clock ~inbox =
   let target, _idx =
     evaluate_rules state.config.rules url state.config.defaults.unmatched
   in
@@ -250,30 +245,25 @@ let handle_open (state : state) (tenant : string) (url : string)
   let state = { state with cooldowns } in
   deliver_url state target url ~sw ~clock ~inbox
 
-let handle_open_on (state : state) (target : string) (url : string)
-    ~sw ~clock ~inbox :
-    state * (Protocol.route_result, string) Result.t Eio.Promise.t =
+let handle_open_on state target url ~sw ~clock ~inbox =
   deliver_url state target url ~sw ~clock ~inbox
 
-let handle_test (state : state) (url : string) :
-    state * (Protocol.test_result, string) Result.t =
+let handle_test state url =
   let target, idx =
     evaluate_rules state.config.rules url state.config.defaults.unmatched
   in
   match idx with
-  | Some i -> (state, Ok (Match { tenant = target; rule_index = i }))
-  | None -> (state, Ok (No_match { default_tenant = target }))
+  | Some i -> (state, Ok (Protocol.Match { tenant = target; rule_index = i }))
+  | None -> (state, Ok (Protocol.No_match { default_tenant = target }))
 
-let handle_status (state : state) :
-    state * (Protocol.status_info, string) Result.t =
+let handle_status state =
   let tenants = Map.keys state.registry in
   let uptime =
     Unix.gettimeofday () -. state.start_time |> Float.to_int
   in
-  (state, Ok { registered_tenants = tenants; uptime_seconds = uptime })
+  (state, Ok { Protocol.registered_tenants = tenants; uptime_seconds = uptime })
 
-let handle_set_config (state : state) (cfg : Protocol.config) :
-    state * (unit, string) Result.t =
+let handle_set_config state cfg =
   let state = { state with config = cfg } in
   (try
      save_config_to_path state.config_path cfg;
@@ -281,8 +271,7 @@ let handle_set_config (state : state) (cfg : Protocol.config) :
    with exn ->
      (state, Error (Printf.sprintf "failed to save config: %s" (Exn.to_string exn))))
 
-let handle_add_rule (state : state) (rule : Protocol.rule) :
-    state * (unit, string) Result.t =
+let handle_add_rule state (rule : Protocol.rule) =
   match compile_regex rule.pattern with
   | Error msg -> (state, Error msg)
   | Ok _ ->
@@ -294,8 +283,7 @@ let handle_add_rule (state : state) (rule : Protocol.rule) :
      with exn ->
        (state, Error (Printf.sprintf "failed to save config: %s" (Exn.to_string exn))))
 
-let handle_update_rule (state : state) (idx : int) (rule : Protocol.rule) :
-    state * (unit, string) Result.t =
+let handle_update_rule state idx (rule : Protocol.rule) =
   match compile_regex rule.pattern with
   | Error msg -> (state, Error msg)
   | Ok _ ->
@@ -317,8 +305,7 @@ let handle_update_rule (state : state) (idx : int) (rule : Protocol.rule) :
         with exn ->
           (state, Error (Printf.sprintf "failed to save config: %s" (Exn.to_string exn)))))
 
-let handle_delete_rule (state : state) (idx : int) :
-    state * (unit, string) Result.t =
+let handle_delete_rule state idx =
   let config = state.config in
   let len = List.length config.rules in
   match idx >= 0 && idx < len with
@@ -338,9 +325,7 @@ let handle_delete_rule (state : state) (idx : int) :
 
 (* -- Command dispatch *)
 
-let resolve_reply (reply : string Eio.Promise.u)
-    (tenant : string) (line : string)
-    (response_line : string) : unit =
+let resolve_reply reply tenant line response_line =
   printf "[url-router] req[%s]: %s\n[url-router] res[%s]: %s\n%!" tenant line tenant response_line;
   Eio.Promise.resolve reply response_line
 
@@ -400,8 +385,7 @@ let dispatch_command :
 
 (* -- Coordinator loop *)
 
-let dispatch_line (state : state) (line : string) ~reply
-    ~sw ~clock ~inbox : state =
+let dispatch_line state line ~reply ~sw ~clock ~inbox =
   match Protocol.deserialize_server_command line with
   | Error msg ->
     let resp = Printf.sprintf "ERR %s" msg in
@@ -411,8 +395,7 @@ let dispatch_line (state : state) (line : string) ~reply
   | Ok (Server_command { tenant; command }) ->
     dispatch_command state tenant command ~reply ~line ~sw ~clock ~inbox
 
-let rec coordinator_loop (state : state) (inbox : coordinator_msg Eio.Stream.t)
-    ~(sw : Eio.Switch.t) ~(clock : _ Eio.Time.clock) : unit =
+let rec coordinator_loop state inbox ~sw ~clock =
   let msg = Eio.Stream.take inbox in
   let state =
     match msg with
@@ -488,7 +471,7 @@ let rec coordinator_loop (state : state) (inbox : coordinator_msg Eio.Stream.t)
 
 (* -- Registration (long-lived connection) *)
 
-let handle_register (inbox : coordinator_msg Eio.Stream.t) ~tenant ~brand flow reader =
+let handle_register inbox ~tenant ~brand flow reader =
   let push_stream = Eio.Stream.create 16 in
   let (promise, reply) = Eio.Promise.create () in
   Eio.Stream.add inbox (Register_tenant { tenant; brand; push_stream; reply });
@@ -521,7 +504,7 @@ let handle_register (inbox : coordinator_msg Eio.Stream.t) ~tenant ~brand flow r
 
 (* -- Connection handling *)
 
-let handle_connection (inbox : coordinator_msg Eio.Stream.t) flow =
+let handle_connection inbox flow =
   let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
   match Eio.Buf_read.line reader with
   | exception (End_of_file | Eio.Io _) -> ()
