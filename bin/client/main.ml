@@ -1,13 +1,6 @@
 open! Base
 open! Stdio
 
-(* -- Socket path *)
-
-let socket_path () =
-  match Sys.getenv "ALLOY_SOCKET" with
-  | Some path -> path
-  | None -> Protocol.default_socket_path ()
-
 (* -- CLI argument parsing *)
 
 type cli_mode =
@@ -382,7 +375,7 @@ let run_bridge env =
          (None, default_tenant, None))
     | None -> (None, default_tenant, None)
   in
-  let sock_path = Option.value sock_override ~default:(socket_path ()) in
+  let sock_path = Option.value sock_override ~default:(Protocol.default_socket_path ()) in
   let (registered, resolve_registered) = Eio.Promise.create () in
   let resolve_once =
     let resolved = ref false in
@@ -412,7 +405,7 @@ let run_cli { mode; socket; name } =
   let resolve_socket () =
     match socket with
     | Some s -> s
-    | None -> socket_path ()
+    | None -> Protocol.default_socket_path ()
   in
   let resolve_tenant default =
     match name with

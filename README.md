@@ -139,7 +139,7 @@ alloy delete-rule <index>          # Delete rule
 ```
 
 Socket path defaults to `/run/user/<uid>/alloy.sock` (override with
-`ALLOY_SOCKET`).
+`--socket`/`-s`).
 
 To set as the default URL handler:
 
