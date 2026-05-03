@@ -117,7 +117,7 @@ let escape_regexp (s : string) : string =
     match c with
     | '.' | '*' | '+' | '?' | '^' | '$'
     | '{' | '}' | '(' | ')' | '|' | '[' | ']' | '\\' ->
-      Printf.sprintf "\\%c" c
+      Printf.sprintf "[%c]" c
     | c -> String.of_char c)
 
 let bind_clicks (parent : Dom_html.element Js.t) ~(selector : string)
