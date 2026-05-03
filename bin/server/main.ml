@@ -1,5 +1,6 @@
 open! Base
 open! Stdio
+open! Log
 
 (* -- State *)
 
@@ -87,11 +88,11 @@ let load_config path =
         Protocol.config_of_yojson json)
   | false ->
     let config = default_config () in
-    Log.printf "no config found, creating default at %s" path;
+    log "no config found, creating default at %s" path;
     (try
        save_config_to_path path config
      with exn ->
-       Log.printf "warning: could not write default config: %s"
+       log "warning: could not write default config: %s"
          (Exn.to_string exn));
     Ok config
 
@@ -142,7 +143,7 @@ let launch_browser cmd =
   let args = String.split ~on:' ' cmd |> Array.of_list in
   let pid = Unix.create_process args.(0) args dev_null dev_null dev_null in
   Unix.close dev_null;
-  Log.printf "launched browser (pid %d): %s" pid cmd
+  log "launched browser (pid %d): %s" pid cmd
 
 (* -- Deliver URL to tenant (idempotent, may defer) *)
 
@@ -163,11 +164,11 @@ let deliver_url state target url ~sw ~clock ~inbox =
         in
         match browser_cmd with
         | None ->
-          Log.printf "tenant %s has no browser command" target;
+          log "tenant %s has no browser command" target;
           None
         | Some cmd ->
           let timeout = Float.of_int state.config.defaults.browser_launch_timeout in
-          Log.printf "starting tenant %s (timeout %.0fs): %s" target timeout cmd;
+          log "starting tenant %s (timeout %.0fs): %s" target timeout cmd;
           Eio.Fiber.fork ~sw (fun () ->
               launch_browser cmd;
               Eio.Time.sleep clock timeout;
@@ -179,7 +180,7 @@ let deliver_url state target url ~sw ~clock ~inbox =
       let pending, promise =
         match List.find pending ~f:(fun pd -> String.equal pd.url url) with
         | Some { promise; _ } ->
-          Log.printf "URL already queued for starting tenant %s: %s" target url;
+          log "URL already queued for starting tenant %s: %s" target url;
           pending, promise
         | None ->
           let (promise, resolver) = Eio.Promise.create () in
@@ -310,8 +311,8 @@ let handle_delete_rule state idx =
 (* -- Command dispatch *)
 
 let resolve_reply reply tenant line response_line =
-  Log.printf "req[%s]: %s" tenant line;
-  Log.printf "res[%s]: %s" tenant response_line;
+  log "req[%s]: %s" tenant line;
+  log "res[%s]: %s" tenant response_line;
   Eio.Promise.resolve reply response_line
 
 let dispatch_command :
@@ -374,8 +375,8 @@ let dispatch_line state line ~reply ~sw ~clock ~inbox =
   match Protocol.deserialize_server_command line with
   | Error msg ->
     let resp = Printf.sprintf "ERR %s" msg in
-    Log.printf "req: %s" line;
-    Log.printf "res: %s" resp;
+    log "req: %s" line;
+    log "res: %s" resp;
     Eio.Promise.resolve reply resp;
     state
   | Ok (Server_command { tenant; command }) ->
@@ -389,12 +390,12 @@ let rec coordinator_loop state inbox ~sw ~clock =
       (match Map.mem state.registry tenant with
        | true ->
          Eio.Promise.resolve reply (Error "tenant already registered");
-         Log.printf "tenant %s register rejected (already registered)" tenant;
+         log "tenant %s register rejected (already registered)" tenant;
          state
        | false ->
          let registry = Map.set state.registry ~key:tenant ~data:push_stream in
          Eio.Promise.resolve reply (Ok ());
-         Log.printf "tenant %s registered (brand=%s)" tenant
+         log "tenant %s registered (brand=%s)" tenant
            (Option.value brand ~default:"(none)");
          let state = { state with registry } in
          (* Flush pending deliveries if tenant was starting *)
@@ -406,7 +407,7 @@ let rec coordinator_loop state inbox ~sw ~clock =
                let push_line = Protocol.serialize_push (Navigate pd.url) in
                Eio.Stream.add push_stream push_line;
                Eio.Promise.resolve pd.reply (Ok (Protocol.Remote tenant));
-               Log.printf "delivered pending URL to %s: %s" tenant pd.url);
+               log "delivered pending URL to %s: %s" tenant pd.url);
              let starting = List.Assoc.remove state.starting ~equal:String.equal tenant in
              { state with starting }
          in
@@ -426,7 +427,7 @@ let rec coordinator_loop state inbox ~sw ~clock =
              let new_tenant : Protocol.tenant_config =
                { browser_cmd = suggested_cmd; label = tenant; color = "#808080"; brand }
              in
-             Log.printf "auto-added tenant %s to config" tenant;
+             log "auto-added tenant %s to config" tenant;
              state.config.tenants @ [ (tenant, new_tenant) ]
          in
          let config = { state.config with tenants } in
@@ -434,7 +435,7 @@ let rec coordinator_loop state inbox ~sw ~clock =
          { state with config })
     | Unregister_tenant { tenant } ->
       let registry = Map.remove state.registry tenant in
-      Log.printf "tenant %s unregistered" tenant;
+      log "tenant %s unregistered" tenant;
       { state with registry }
     | Launch_timeout { tenant } ->
       (match List.Assoc.find state.starting ~equal:String.equal tenant with
@@ -443,9 +444,9 @@ let rec coordinator_loop state inbox ~sw ~clock =
          List.iter sentinel.pending ~f:(fun pd ->
            let msg = Printf.sprintf "tenant %s failed to start within timeout" tenant in
            Eio.Promise.resolve pd.reply (Error msg);
-           Log.printf "timeout: failed to deliver URL to %s: %s" tenant pd.url);
+           log "timeout: failed to deliver URL to %s: %s" tenant pd.url);
          let starting = List.Assoc.remove state.starting ~equal:String.equal tenant in
-         Log.printf "tenant %s start timed out" tenant;
+         log "tenant %s start timed out" tenant;
          { state with starting })
   in
   coordinator_loop state inbox ~sw ~clock
@@ -490,14 +491,14 @@ let handle_connection inbox flow =
   match Eio.Buf_read.line reader with
   | exception (End_of_file | Eio.Io _) -> ()
   | line ->
-    Log.printf "req: %s" line;
+    log "req: %s" line;
     (match Protocol.deserialize_server_command line with
      | Error msg ->
        let resp = Printf.sprintf "ERR %s" msg in
-       Log.printf "res: %s" resp;
+       log "res: %s" resp;
        Eio.Flow.copy_string (resp ^ "\n") flow
      | Ok (Server_command { tenant; command = Register brand }) ->
-       Log.printf "res[%s]: registering (brand=%s)" tenant
+       log "res[%s]: registering (brand=%s)" tenant
          (Option.value brand ~default:"(none)");
        handle_register inbox ~tenant ~brand flow reader
      | Ok (Server_command _) ->
@@ -520,14 +521,14 @@ let run config_path =
     match load_config config_path with
     | Ok c -> c
     | Error msg ->
-      Log.printf "fatal: %s" msg;
+      log "fatal: %s" msg;
       Stdlib.exit 1
   in
   let compiled_rules =
     match compile_rules config.rules with
     | Ok cr -> cr
     | Error msg ->
-      Log.printf "fatal: invalid rules in config: %s" msg;
+      log "fatal: invalid rules in config: %s" msg;
       Stdlib.exit 1
   in
   let initial_state =
@@ -548,14 +549,14 @@ let run config_path =
   let listening =
     Eio.Net.listen ~sw ~backlog:128 net (`Unix socket_path)
   in
-  Log.printf "listening on %s" socket_path;
+  log "listening on %s" socket_path;
   Eio.Fiber.all [
     (fun () -> coordinator_loop initial_state inbox ~sw ~clock);
     (fun () ->
       let rec accept_loop () =
         Eio.Net.accept_fork ~sw listening
           ~on_error:(fun exn ->
-            Log.printf "connection error: %s"
+            log "connection error: %s"
               (Exn.to_string exn))
           (fun flow _addr -> handle_connection inbox flow);
         accept_loop ()
