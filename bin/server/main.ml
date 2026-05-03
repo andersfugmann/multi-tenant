@@ -358,22 +358,22 @@ let dispatch_command :
   | Protocol.Set_config cfg ->
     let (state, resp) = handle_set_config state cfg in
     resolve_reply reply tenant line (Protocol.serialize_response (Set_config cfg) resp);
-    broadcast_config state;
+    (match resp with Ok () -> broadcast_config state | Error _ -> ());
     state
   | Protocol.Add_rule rule ->
     let (state, resp) = handle_add_rule state rule in
     resolve_reply reply tenant line (Protocol.serialize_response (Add_rule rule) resp);
-    broadcast_config state;
+    (match resp with Ok () -> broadcast_config state | Error _ -> ());
     state
   | Protocol.Update_rule (idx, rule) ->
     let (state, resp) = handle_update_rule state idx rule in
     resolve_reply reply tenant line (Protocol.serialize_response (Update_rule (idx, rule)) resp);
-    broadcast_config state;
+    (match resp with Ok () -> broadcast_config state | Error _ -> ());
     state
   | Protocol.Delete_rule idx ->
     let (state, resp) = handle_delete_rule state idx in
     resolve_reply reply tenant line (Protocol.serialize_response (Delete_rule idx) resp);
-    broadcast_config state;
+    (match resp with Ok () -> broadcast_config state | Error _ -> ());
     state
   | Protocol.Status ->
     let (state, resp) = handle_status state in
