@@ -368,7 +368,9 @@ let bridge_push_fiber ~net ~tenant ~brand ~addr
       let first_line = Eio.Buf_read.line reader in
       (match Protocol.deserialize_response (Register brand) first_line with
        | Ok tid -> on_registered tid
-       | Error _msg -> on_registered tenant);
+       | Error msg ->
+         eprintf "Registration failed: %s\n%!" msg;
+         failwith msg);
       let rec read_loop () =
         let push_line = Eio.Buf_read.line reader in
         (match Protocol.deserialize_push push_line with
@@ -381,7 +383,8 @@ let bridge_push_fiber ~net ~tenant ~brand ~addr
       read_loop ()
     with
     | () -> ()
-    | exception _exn ->
+    | exception exn ->
+      eprintf "Bridge push error: %s\n%!" (Exn.to_string exn);
       on_registered tenant;
       Eio_unix.sleep 2.0;
       connect_loop ()

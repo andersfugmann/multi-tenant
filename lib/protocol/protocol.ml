@@ -418,12 +418,14 @@ let deserialize_push (line : string) : (packed_server_push, string) Result.t =
     Ok (Push (Navigate (rejoin url_parts)))
   | "CONFIG_UPDATED" :: (_ :: _ as json_parts) ->
     let* json = parse_json_string (rejoin json_parts) in
-    let open Yojson.Safe.Util in
-    let* cfg = config_of_yojson (member "config" json) in
+    let* cfg = config_of_yojson (Yojson.Safe.Util.member "config" json) in
     let registered =
-      member "registered_tenants" json
-      |> to_list
-      |> List.map ~f:to_string
+      match Yojson.Safe.Util.member "registered_tenants" json with
+      | `List items ->
+        List.filter_map items ~f:(function
+          | `String s -> Some s
+          | _ -> None)
+      | _ -> []
     in
     Ok (Push (Config_updated (cfg, registered)))
   | _ -> Error (Printf.sprintf "unknown push: %s" line)

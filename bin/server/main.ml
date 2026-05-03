@@ -400,8 +400,11 @@ let rec coordinator_loop state inbox ~sw ~clock =
     | Register_tenant { tenant; brand; push_stream; reply } ->
       (match Map.mem state.registry tenant with
        | true ->
-         Eio.Promise.resolve reply (Error "tenant already registered");
-         log "tenant %s register rejected (already registered)" tenant;
+         log "tenant %s re-registering (replacing stale connection)" tenant;
+         let registry = Map.set state.registry ~key:tenant ~data:push_stream in
+         Eio.Promise.resolve reply (Ok tenant);
+         let state = { state with registry } in
+         broadcast_config state;
          state
        | false ->
          let registry = Map.set state.registry ~key:tenant ~data:push_stream in
