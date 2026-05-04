@@ -73,10 +73,24 @@ sudo dpkg -i alloy_<version>_amd64.deb
 ```
 
 Installs the bridge/CLI, native messaging manifests (Chromium and Edge),
-a signed `.crx` that
-[auto-installs](https://developer.chrome.com/docs/extensions/how-to/distribute/install-extensions-linux)
-on next browser launch, and a `.desktop` entry for use as the default URL
-handler.
+and a `.desktop` entry for use as the default URL handler.
+
+**Microsoft Edge:** The extension auto-installs on next browser launch
+via the signed `.crx` and Edge's
+[external extension](https://developer.chrome.com/docs/extensions/how-to/distribute/install-extensions-linux)
+mechanism.
+
+**Chromium / Google Chrome:** Auto-install is not supported. Load the
+extension manually:
+
+1. Open `chrome://extensions`
+2. Enable **Developer mode** (toggle in top-right)
+3. Click **Load unpacked**
+4. Select `/usr/share/alloy/extension`
+
+The extension updates in place when the package is upgraded — restart
+the browser (or click the reload ↻ button on the extensions page) to
+pick up changes.
 
 The daemon must be reachable from each tenant over TCP. For containers,
 ensure the container's network can reach the host on the configured port
