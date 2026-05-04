@@ -28,7 +28,9 @@ describe("navigation interception", () => {
 
     expect(port.postMessage).toHaveBeenCalledTimes(1);
     const msg = port.postMessage.mock.calls[0][0];
-    expect(msg).toEqual(["Open", { url: "https://example.com" }]);
+    // Wire.request envelope: {id, command, tenant}
+    expect(msg).toHaveProperty("command", ["Open", { url: "https://example.com" }]);
+    expect(msg).toHaveProperty("id");
   });
 
   test("ignores sub-frame navigations", () => {
@@ -57,9 +59,8 @@ describe("navigation interception", () => {
 
   test("handles NAVIGATE push by opening a tab", () => {
     const port = mock.ports[0];
-    const pushMsg = { Push: ["Navigate", { url: "https://pushed.example.com" }] };
-    // ppx format: ["Push", ["Navigate", {url: ...}]]
-    triggerPortMessage(port, ["Push", ["Navigate", { url: "https://pushed.example.com" }]]);
+    // Wire.server_message Push format: ["Push", {id, push}]
+    triggerPortMessage(port, ["Push", { id: 0, push: ["Navigate", { url: "https://pushed.example.com" }] }]);
 
     expect(mock.chrome.tabs.create).toHaveBeenCalledWith({
       url: "https://pushed.example.com",
@@ -84,9 +85,8 @@ describe("response handling", () => {
     const port = mock.ports[0];
     triggerNavigation(mock.listeners, "https://example.com", 1, 0);
 
-    // Simulate response: bridge sends back Response with Ok_unit (Local maps to Local in route_result)
-    // ppx format for Wire.response: Response wraps the wire response
-    triggerPortMessage(port, ["Response", ["Ok_route", { Local: [] }]]);
+    // Wire.server_message Response format: ["Response", {id, response}]
+    triggerPortMessage(port, ["Response", { id: 1, response: ["Ok_route", ["Local"]] }]);
 
     // Should not create a tab for local routing
     expect(mock.chrome.tabs.create).not.toHaveBeenCalled();
