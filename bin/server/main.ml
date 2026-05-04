@@ -548,7 +548,12 @@ let serve_file path content_type =
     Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"Not found" ()
 
 let http_handler _conn request _body =
-  let path = Http.Request.resource request in
+  let resource = Http.Request.resource request in
+  let path =
+    match String.lsplit2 resource ~on:'?' with
+    | Some (p, _) -> p
+    | None -> resource
+  in
   match path with
   | "/updates.xml" -> serve_file (extension_dir ^ "/updates.xml") "application/xml"
   | "/extension.crx" -> serve_file (extension_dir ^ "/extension.crx") "application/x-chrome-extension"

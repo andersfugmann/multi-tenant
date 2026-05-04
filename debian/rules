@@ -43,6 +43,13 @@ override_dh_auto_install:
 	# Canonical extension descriptor (used by Edge and other Chromium forks)
 	install -D -m 644 debian/$(EXT_ID).json \
 		debian/alloy/usr/share/alloy/$(EXT_ID).json
+	# Chromium and Chrome: external_update_url via HTTP
+	mkdir -p debian/alloy/usr/share/chromium/extensions
+	ln -sf /usr/share/alloy/$(EXT_ID).json \
+		debian/alloy/usr/share/chromium/extensions/$(EXT_ID).json
+	mkdir -p debian/alloy/usr/share/google-chrome/extensions
+	ln -sf /usr/share/alloy/$(EXT_ID).json \
+		debian/alloy/usr/share/google-chrome/extensions/$(EXT_ID).json
 	# Edge still uses the extensions directory mechanism
 	for variant in msedge msedge-beta msedge-dev msedge-canary; do \
 		mkdir -p debian/alloy/opt/microsoft/$$variant/extensions; \
@@ -53,11 +60,6 @@ override_dh_auto_install:
 		debian/alloy/usr/share/alloy/extension.crx
 	install -D -m 644 debian/updates.xml \
 		debian/alloy/usr/share/alloy/updates.xml
-	# Browser policies for force-install (Chromium no longer supports external_crx)
-	install -D -m 644 debian/alloy-extension-policy.json \
-		debian/alloy/etc/chromium/policies/managed/alloy.json
-	install -D -m 644 debian/alloy-extension-policy.json \
-		debian/alloy/etc/opt/chrome/policies/managed/alloy.json
 	install -D -m 644 debian/alloy.desktop \
 		debian/alloy/usr/share/applications/alloy.desktop
 	install -D -m 644 config.example.json \
