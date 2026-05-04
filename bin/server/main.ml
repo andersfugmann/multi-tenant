@@ -125,9 +125,6 @@ let find_matching_rule compiled_rules url =
 
 (* -- Cooldown *)
 
-let cooldown_key tenant url =
-  Printf.sprintf "%s:%s" tenant url
-
 let check_and_prune_cooldowns cooldowns ~now ~key =
   let rec loop acc = function
     | [] -> (false, List.rev acc)
@@ -204,8 +201,7 @@ let handle_open state tenant url ~sw ~clock ~inbox =
     Option.value ~default:(state.config.defaults.unmatched, 0) (find_matching_rule state.compiled_rules url)
   in
   let now = Unix.gettimeofday () in
-  let cooldown_key = cooldown_key tenant url in
-  let (in_cooldown, pruned) = check_and_prune_cooldowns state.cooldowns ~now ~key:cooldown_key in
+  let (in_cooldown, pruned) = check_and_prune_cooldowns state.cooldowns ~now ~key:url in
   let state = { state with cooldowns = pruned } in
   let target = match in_cooldown with
     | true -> "local"
@@ -218,7 +214,7 @@ let handle_open state tenant url ~sw ~clock ~inbox =
     | "local" -> state.cooldowns
     | _ ->
       let cooldown = Float.of_int state.config.defaults.cooldown_seconds in
-      { key = cooldown_key; expires = now +. cooldown } :: state.cooldowns
+      { key = url; expires = now +. cooldown } :: state.cooldowns
   in
   let state = { state with cooldowns } in
   match String.equal target "local" with
