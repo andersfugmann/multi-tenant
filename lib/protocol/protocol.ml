@@ -29,126 +29,14 @@ let parse_address (s : string) : address =
     | None -> { host = s; port = default_port }
     end
 
-(* -- CIDR parsing and matching *)
-
-type cidr = { addr : bytes; prefix_len : int }
-
-let parse_ipv4 s =
-  let parts = String.split s ~on:'.' in
-  match List.map parts ~f:Int.of_string_opt with
-  | [ Some a; Some b; Some c; Some d ]
-    when a >= 0 && a <= 255 && b >= 0 && b <= 255
-         && c >= 0 && c <= 255 && d >= 0 && d <= 255 ->
-    let buf = Bytes.create 4 in
-    Bytes.set buf 0 (Char.of_int_exn a);
-    Bytes.set buf 1 (Char.of_int_exn b);
-    Bytes.set buf 2 (Char.of_int_exn c);
-    Bytes.set buf 3 (Char.of_int_exn d);
-    Some buf
-  | _ -> None
-
-let parse_hex_groups strs =
-  let groups = List.map strs ~f:(fun p -> Int.of_string_opt ("0x" ^ p)) in
-  match List.for_all groups ~f:Option.is_some with
-  | true -> Some (List.filter_map groups ~f:Fn.id)
-  | false -> None
-
-let expand_ipv6_groups (s : string) : int list option =
-  match String.substr_index s ~pattern:"::" with
-  | Some idx ->
-    let left_str = String.prefix s idx in
-    let right_str = String.drop_prefix s (idx + 2) in
-    let left_parts = match String.is_empty left_str with true -> [] | false -> String.split left_str ~on:':' in
-    let right_parts = match String.is_empty right_str with true -> [] | false -> String.split right_str ~on:':' in
-    begin match (parse_hex_groups left_parts, parse_hex_groups right_parts) with
-    | (Some lv, Some rv) ->
-      let pad_len = 8 - List.length lv - List.length rv in
-      begin match pad_len >= 0 with
-      | true -> Some (lv @ List.init pad_len ~f:(fun _ -> 0) @ rv)
-      | false -> None
-      end
-    | _ -> None
-    end
-  | None ->
-    let parts = String.split s ~on:':' in
-    begin match List.length parts = 8 with
-    | true -> parse_hex_groups parts
-    | false -> None
-    end
-
-let groups_to_bytes vals =
-  match List.length vals = 8
-        && List.for_all vals ~f:(fun v -> v >= 0 && v <= 0xffff) with
-  | false -> None
-  | true ->
-    let buf = Bytes.create 16 in
-    List.iteri vals ~f:(fun i v ->
-      Bytes.set buf (i * 2) (Char.of_int_exn ((v lsr 8) land 0xff));
-      Bytes.set buf (i * 2 + 1) (Char.of_int_exn (v land 0xff)));
-    Some buf
-
-let parse_ipv6 s =
-  Option.bind (expand_ipv6_groups s) ~f:groups_to_bytes
-
-let ip_to_bytes (s : string) : bytes option =
-  match parse_ipv4 s with
-  | Some b -> Some b
-  | None -> parse_ipv6 s
-
-let parse_cidr (s : string) : cidr option =
-  let make_cidr addr prefix_len =
-    let max_bits = Bytes.length addr * 8 in
-    match prefix_len >= 0 && prefix_len <= max_bits with
-    | true -> Some { addr; prefix_len }
-    | false -> None
-  in
-  match String.lsplit2 s ~on:'/' with
-  | None ->
-    Option.map (ip_to_bytes s) ~f:(fun addr ->
-      { addr; prefix_len = Bytes.length addr * 8 })
-  | Some (ip_str, prefix_str) ->
-    begin match (ip_to_bytes ip_str, Int.of_string_opt prefix_str) with
-    | (Some addr, Some prefix_len) -> make_cidr addr prefix_len
-    | _ -> None
-    end
-
-let prefix_bytes_match ip_bytes cidr_bytes ~full_bytes =
-  let rec check i =
-    match i >= full_bytes with
-    | true -> true
-    | false ->
-      match Char.equal (Bytes.get ip_bytes i) (Bytes.get cidr_bytes i) with
-      | true -> check (i + 1)
-      | false -> false
-  in
-  check 0
-
-let partial_byte_matches ip_bytes cidr_bytes ~byte_idx ~remaining_bits =
-  let mask = 0xff lsl (8 - remaining_bits) land 0xff in
-  let ip_byte = Char.to_int (Bytes.get ip_bytes byte_idx) in
-  let cidr_byte = Char.to_int (Bytes.get cidr_bytes byte_idx) in
-  Int.equal (ip_byte land mask) (cidr_byte land mask)
-
-let ip_in_cidr (ip : string) (cidr : cidr) : bool =
-  match ip_to_bytes ip with
-  | None -> false
-  | Some ip_bytes ->
-    match Bytes.length ip_bytes = Bytes.length cidr.addr with
-    | false -> false
-    | true ->
-      let full_bytes = cidr.prefix_len / 8 in
-      let remaining_bits = cidr.prefix_len % 8 in
-      match prefix_bytes_match ip_bytes cidr.addr ~full_bytes with
-      | false -> false
-      | true ->
-        match remaining_bits > 0 with
-        | false -> true
-        | true -> partial_byte_matches ip_bytes cidr.addr ~byte_idx:full_bytes ~remaining_bits
-
-let ip_allowed ~allowed_networks ip =
-  List.exists allowed_networks ~f:(fun cidr -> ip_in_cidr ip cidr)
-
 let default_allowed_networks = [ "127.0.0.0/8"; "::1/128" ]
+
+let internal_url_prefixes =
+  [ "chrome://"; "chrome-extension://"; "about:"; "edge://"; "brave://";
+    "chrome-search://"; "devtools://" ]
+
+let is_internal_url url =
+  List.exists internal_url_prefixes ~f:(fun prefix -> String.is_prefix url ~prefix)
 
 (* -- Core data types *)
 
@@ -234,14 +122,6 @@ type _ command =
   | Update_rule : int * rule -> unit command
   | Delete_rule : int -> unit command
   | Status : status_info command
-
-(* -- Server push *)
-
-type _ server_push =
-  | Navigate : url -> url server_push
-  | Config_updated : (config * string list) -> (config * string list) server_push
-
-type packed_server_push = Push : 'a server_push -> packed_server_push
 
 (* -- Existential wrappers *)
 
@@ -390,12 +270,6 @@ let deserialize_command_json (json : Yojson.Safe.t) :
   let* wire = Wire.command_of_yojson json in
   Ok (command_of_wire wire)
 
-let push_to_wire (push : packed_server_push) : Wire.push =
-  match push with
-  | Push (Navigate url) -> Navigate { url }
-  | Push (Config_updated (cfg, registered)) ->
-    Config_updated { config = cfg; registered_tenants = registered }
-
 let wire_command_name : Wire.command -> string = function
   | Register _ -> "Register"
   | Open _ -> "Open"
@@ -437,30 +311,6 @@ let%expect_test "sample data" =
   in
   [%expect {||}]
 
-let[@warning "-32"] sample_config =
-  {
-    listen = [ "127.0.0.1:7120"; "[::1]:7120" ];
-    allowed_networks = default_allowed_networks;
-    tenants =
-      [
-        ( "work",
-          { browser_cmd = Some "chromium --profile-directory=Work";
-            label = "Work";
-            color = "#0000ff";
-            brand = Some "Google Chrome" } );
-      ];
-    rules =
-      [ { pattern = ".*[.]example[.]com"; target = "work"; enabled = true } ];
-    defaults =
-      { unmatched = "personal"; cooldown_seconds = 5; browser_launch_timeout = 10 };
-  }
-
-let[@warning "-32"] sample_rule =
-  { pattern = ".*[.]example[.]com"; target = "work"; enabled = true }
-
-let[@warning "-32"] sample_status =
-  { registered_tenants = [ "work"; "personal" ]; uptime_seconds = 3600 }
-
 (* -- JSON: commands *)
 
 let%expect_test "json: round-trip register" =
@@ -501,7 +351,17 @@ let%expect_test "json: round-trip test" =
   [%expect {| url=https://example.com |}]
 
 let%expect_test "json: round-trip set_config" =
-  let json = serialize_command_json (Set_config sample_config) in
+  let cfg = {
+    listen = [ "127.0.0.1:7120"; "[::1]:7120" ];
+    allowed_networks = default_allowed_networks;
+    tenants =
+      [ ( "work",
+          { browser_cmd = Some "chromium --profile-directory=Work";
+            label = "Work"; color = "#0000ff"; brand = Some "Google Chrome" } ) ];
+    rules = [ { pattern = ".*[.]example[.]com"; target = "work"; enabled = true } ];
+    defaults = { unmatched = "personal"; cooldown_seconds = 5; browser_launch_timeout = 10 };
+  } in
+  let json = serialize_command_json (Set_config cfg) in
   (match deserialize_command_json json with
    | Ok (Command (Set_config cfg)) ->
      printf "listen=%s\n" (String.concat ~sep:"," cfg.listen)
@@ -509,14 +369,16 @@ let%expect_test "json: round-trip set_config" =
   [%expect {| listen=127.0.0.1:7120,[::1]:7120 |}]
 
 let%expect_test "json: round-trip add_rule" =
-  let json = serialize_command_json (Add_rule sample_rule) in
+  let rule = { pattern = ".*[.]example[.]com"; target = "work"; enabled = true } in
+  let json = serialize_command_json (Add_rule rule) in
   (match deserialize_command_json json with
    | Ok (Command (Add_rule r)) -> printf "pattern=%s\n" r.pattern
    | _ -> print_endline "FAIL");
   [%expect {| pattern=.*[.]example[.]com |}]
 
 let%expect_test "json: round-trip update_rule" =
-  let json = serialize_command_json (Update_rule (5, sample_rule)) in
+  let rule = { pattern = ".*[.]example[.]com"; target = "work"; enabled = true } in
+  let json = serialize_command_json (Update_rule (5, rule)) in
   (match deserialize_command_json json with
    | Ok (Command (Update_rule (idx, r))) ->
      printf "idx=%d pattern=%s\n" idx r.pattern
@@ -610,7 +472,17 @@ let%expect_test "json: server_message error response" =
   [%expect {| id=5 err=not found |}]
 
 let%expect_test "json: response config round-trip" =
-  let wire_resp = response_to_wire Get_config (Ok sample_config) in
+  let cfg = {
+    listen = [ "127.0.0.1:7120"; "[::1]:7120" ];
+    allowed_networks = default_allowed_networks;
+    tenants =
+      [ ( "work",
+          { browser_cmd = Some "chromium --profile-directory=Work";
+            label = "Work"; color = "#0000ff"; brand = Some "Google Chrome" } ) ];
+    rules = [ { pattern = ".*[.]example[.]com"; target = "work"; enabled = true } ];
+    defaults = { unmatched = "personal"; cooldown_seconds = 5; browser_launch_timeout = 10 };
+  } in
+  let wire_resp = response_to_wire Get_config (Ok cfg) in
   let msg = Wire.Response { id = 42; response = wire_resp } in
   let s = serialize_server_message msg in
   (match deserialize_server_message s with

@@ -35,18 +35,7 @@ let on_startup = Chrome_api.Runtime.on_startup
 
 (* -- URL filtering *)
 
-let is_internal_url (url : string) : bool =
-  List.exists
-    ~f:(fun prefix -> String.is_prefix url ~prefix)
-    [
-      "chrome://";
-      "chrome-extension://";
-      "about:";
-      "edge://";
-      "brave://";
-      "chrome-search://";
-      "devtools://";
-    ]
+let is_internal_url = Protocol.is_internal_url
 
 (* -- Event types for the coordinator *)
 

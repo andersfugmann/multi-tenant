@@ -8,7 +8,6 @@ type cooldown_entry = { key : string; expires : float }
 
 type pending_delivery = {
   url : string;
-  target : string; (* Not sure what we need this for *)
   reply : (Protocol.route_result, string) Result.t Eio.Promise.u;
   promise : (Protocol.route_result, string) Result.t Eio.Promise.t;
 }
@@ -141,8 +140,7 @@ let check_and_prune_cooldowns cooldowns ~now ~key =
 
 let launch_browser cmd =
   let dev_null = Unix.openfile "/dev/null" [ Unix.O_RDWR ] 0o000 in
-  let args = String.split ~on:' ' cmd |> Array.of_list in
-  let pid = Unix.create_process args.(0) args dev_null dev_null dev_null in
+  let pid = Unix.create_process "/bin/sh" [| "/bin/sh"; "-c"; cmd |] dev_null dev_null dev_null in
   Unix.close dev_null;
   log "launched browser (pid %d): %s" pid cmd
 
@@ -185,7 +183,7 @@ let deliver_url state target url ~sw ~clock ~inbox =
           pending, promise
         | None ->
           let (promise, resolver) = Eio.Promise.create () in
-          let pending = { url; target; reply = resolver; promise } :: pending in
+          let pending = { url; reply = resolver; promise } :: pending in
           pending, promise
       in
       let starting = List.Assoc.add state.starting ~equal:String.equal target { pending } in
@@ -241,16 +239,19 @@ let handle_status state =
   in
   (state, Ok { Protocol.registered_tenants = tenants; uptime_seconds = uptime })
 
+let try_save_config state =
+  try
+    save_config_to_path state.config_path state.config;
+    Ok ()
+  with exn ->
+    Error (Printf.sprintf "failed to save config: %s" (Exn.to_string exn))
+
 let handle_set_config state (cfg : Protocol.config) =
   match compile_rules cfg.rules with
   | Error msg -> (state, Error (Printf.sprintf "invalid rules: %s" msg))
   | Ok compiled_rules ->
     let state = { state with config = cfg; compiled_rules } in
-    (try
-       save_config_to_path state.config_path cfg;
-       (state, Ok ())
-     with exn ->
-       (state, Error (Printf.sprintf "failed to save config: %s" (Exn.to_string exn))))
+    (state, try_save_config state)
 
 let handle_add_rule state (rule : Protocol.rule) =
   match compile_rule rule with
@@ -259,11 +260,7 @@ let handle_add_rule state (rule : Protocol.rule) =
     let config = { state.config with rules = state.config.rules @ [ rule ] } in
     let compiled_rules = state.compiled_rules @ [ compiled ] in
     let state = { state with config; compiled_rules } in
-    (try
-       save_config_to_path state.config_path config;
-       (state, Ok ())
-     with exn ->
-       (state, Error (Printf.sprintf "failed to save config: %s" (Exn.to_string exn))))
+    (state, try_save_config state)
 
 let handle_update_rule state idx (rule : Protocol.rule) =
   match compile_rule rule with
@@ -285,11 +282,7 @@ let handle_update_rule state idx (rule : Protocol.rule) =
        in
        let config = { config with rules = new_rules } in
        let state = { state with config; compiled_rules } in
-       (try
-          save_config_to_path state.config_path config;
-          (state, Ok ())
-        with exn ->
-          (state, Error (Printf.sprintf "failed to save config: %s" (Exn.to_string exn)))))
+       (state, try_save_config state))
 
 let handle_delete_rule state idx =
   let config = state.config in
@@ -306,11 +299,7 @@ let handle_delete_rule state idx =
     in
     let config = { config with rules = new_rules } in
     let state = { state with config; compiled_rules } in
-    (try
-       save_config_to_path state.config_path config;
-       (state, Ok ())
-     with exn ->
-       (state, Error (Printf.sprintf "failed to save config: %s" (Exn.to_string exn))))
+    (state, try_save_config state)
 
 (* -- Command dispatch *)
 
@@ -322,7 +311,7 @@ let resolve_reply reply tenant id response_json =
 
 let broadcast_config (state : state) : unit =
   let registered = Map.keys state.registry in
-  let push_wire = Protocol.push_to_wire (Push (Config_updated (state.config, registered))) in
+  let push_wire = Protocol.Wire.Config_updated { config = state.config; registered_tenants = registered } in
   let msg = Protocol.Wire.Push { id = 0; push = push_wire } in
   let s = Protocol.serialize_server_message msg in
   Map.iter state.registry ~f:(fun stream ->
@@ -361,22 +350,22 @@ let dispatch_command :
   | Protocol.Set_config cfg ->
     let (state, resp) = handle_set_config state cfg in
     resolve resp;
-    (match resp with Ok () -> broadcast_config state | Error _ -> ());
+    Result.iter resp ~f:(fun () -> broadcast_config state);
     state
   | Protocol.Add_rule rule ->
     let (state, resp) = handle_add_rule state rule in
     resolve resp;
-    (match resp with Ok () -> broadcast_config state | Error _ -> ());
+    Result.iter resp ~f:(fun () -> broadcast_config state);
     state
   | Protocol.Update_rule (idx, rule) ->
     let (state, resp) = handle_update_rule state idx rule in
     resolve resp;
-    (match resp with Ok () -> broadcast_config state | Error _ -> ());
+    Result.iter resp ~f:(fun () -> broadcast_config state);
     state
   | Protocol.Delete_rule idx ->
     let (state, resp) = handle_delete_rule state idx in
     resolve resp;
-    (match resp with Ok () -> broadcast_config state | Error _ -> ());
+    Result.iter resp ~f:(fun () -> broadcast_config state);
     state
   | Protocol.Status ->
     let (state, resp) = handle_status state in
@@ -437,8 +426,8 @@ let rec coordinator_loop state inbox ~sw ~clock =
              state.config.tenants @ [ (tenant, new_tenant) ]
          in
          let config = { state.config with tenants } in
-         (try save_config_to_path state.config_path config with _ -> ());
          let state = { state with config } in
+         let _ = try_save_config state in
          broadcast_config state;
          state)
     | Unregister_tenant { tenant } ->
@@ -492,7 +481,6 @@ let handle_register inbox ~tenant ~brand ~register_id flow reader =
               | Ok req ->
                 log "req[%s]: id=%d %s" tenant req.id (Protocol.wire_command_name req.command);
                 let (promise, reply) = Eio.Promise.create () in
-                let (Protocol.Command _cmd) = Protocol.command_of_wire req.command in
                 Eio.Stream.add inbox (Dispatch { id = req.id; command = Protocol.command_of_wire req.command; tenant; reply });
                 let response_line = Eio.Promise.await promise in
                 Eio.Stream.add push_stream response_line);
@@ -569,7 +557,7 @@ let run config_path =
   let inbox = Eio.Stream.create 64 in
   let allowed_networks =
     List.filter_map config.allowed_networks ~f:(fun cidr_str ->
-      match Protocol.parse_cidr cidr_str with
+      match Cidr.parse cidr_str with
       | Some cidr -> Some cidr
       | None ->
         log "warning: invalid CIDR in allowed_networks: %s" cidr_str;
@@ -592,7 +580,7 @@ let run config_path =
             match addr with
             | `Tcp (ip, _port) ->
               let ip_str = Unix.string_of_inet_addr (Eio_unix.Net.Ipaddr.to_unix ip) in
-              Protocol.ip_allowed ~allowed_networks ip_str
+              Cidr.ip_allowed ~allowed_networks ip_str
             | _ -> false
           in
           match allowed with

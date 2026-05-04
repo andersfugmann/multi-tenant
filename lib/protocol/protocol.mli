@@ -10,15 +10,11 @@ type address = { host : string; port : int }
 
 val parse_address : string -> address
 
-(** {1 CIDR and network filtering} *)
+(** {1 Network defaults} *)
 
-type cidr = { addr : bytes; prefix_len : int }
-
-val ip_to_bytes : string -> bytes option
-val parse_cidr : string -> cidr option
-val ip_in_cidr : string -> cidr -> bool
-val ip_allowed : allowed_networks:cidr list -> string -> bool
 val default_allowed_networks : string list
+
+val is_internal_url : string -> bool
 
 (** {1 Core data types} *)
 
@@ -90,14 +86,6 @@ type _ command =
   | Delete_rule : int -> unit command
   | Status : status_info command
 
-(** {1 Server push} *)
-
-type _ server_push =
-  | Navigate : url -> url server_push
-  | Config_updated : (config * string list) -> (config * string list) server_push
-
-type packed_server_push = Push : 'a server_push -> packed_server_push
-
 (** {1 Existential wrappers} *)
 
 type packed_command = Command : 'a command -> packed_command
@@ -160,8 +148,6 @@ val serialize_command_json : 'a command -> Yojson.Safe.t
 val deserialize_command_json : Yojson.Safe.t -> (packed_command, string) Result.t
 
 (** {1 JSON serialization — pushes} *)
-
-val push_to_wire : packed_server_push -> Wire.push
 
 (** {1 Logging helpers} *)
 

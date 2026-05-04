@@ -33,18 +33,7 @@ let get_extension_url (path : string) : string =
 let query_active_tab ~(on_result : string -> int -> unit) : unit =
   Chrome_api.Tabs.query_active ~on_result
 
-let is_internal_url (url : string) : bool =
-  List.exists
-    ~f:(fun prefix -> String.is_prefix url ~prefix)
-    [
-      "chrome://";
-      "chrome-extension://";
-      "about:";
-      "edge://";
-      "brave://";
-      "chrome-search://";
-      "devtools://";
-    ]
+let is_internal_url = Protocol.is_internal_url
 
 let validate_regexp (pattern : string) : (unit, string) Result.t =
   match Regexp.regexp pattern with
