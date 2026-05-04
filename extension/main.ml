@@ -233,12 +233,16 @@ let handle_bridge_message (state : state) (raw : string) : state =
        (match response with
         | Ok_registered { tenant_id } ->
           log (Printf.sprintf "← Registered id=0: %s" tenant_id);
-          push (Self_registered { tenant_id })
+          push (Self_registered { tenant_id });
+          state
         | Err { message } ->
-          log (Printf.sprintf "← Registration error id=0: %s" message)
+          log (Printf.sprintf "← Registration error id=0: %s" message);
+          (* Registration failed — disconnect and schedule reconnect *)
+          push Port_disconnected;
+          { state with native_port = None; pending = Map.empty (module Int) }
         | other ->
-          log (Printf.sprintf "← Unexpected id=0 response: %s" (response_type_name other)));
-       state
+          log (Printf.sprintf "← Unexpected id=0 response: %s" (response_type_name other));
+          state)
      | Ok (Response { id; response }) ->
        log (Printf.sprintf "← %s id=%d (pending: %d)"
          (response_type_name response) id (Map.length state.pending));
