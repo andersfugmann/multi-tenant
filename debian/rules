@@ -57,6 +57,8 @@ override_dh_auto_install:
 	done
 	install -D -m 644 _build/extension.crx \
 		debian/alloy/usr/share/alloy/extension.crx
+	install -D -m 644 debian/updates.xml \
+		debian/alloy/usr/share/alloy/updates.xml
 	install -D -m 644 debian/alloy.desktop \
 		debian/alloy/usr/share/applications/alloy.desktop
 	install -D -m 644 config.example.json \
