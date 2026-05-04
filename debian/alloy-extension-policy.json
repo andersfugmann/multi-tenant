@@ -1,5 +1,5 @@
 {
   "ExtensionInstallForcelist": [
-    "jhejkohfkfaeidbbnhjkicadefnapedo;file:///usr/share/alloy/updates.xml"
+    "jhejkohfkfaeidbbnhjkicadefnapedo;http://127.0.0.1:7120/updates.xml"
   ]
 }

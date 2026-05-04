@@ -509,30 +509,60 @@ let handle_register inbox ~tenant ~brand ~register_id flow reader =
 
 (* -- Connection handling *)
 
+let extension_dir = "/usr/share/alloy"
+
+let handle_http flow (request_line : string) =
+  (* Minimal HTTP/1.0 handler for extension update checks *)
+  let path =
+    match String.split request_line ~on:' ' with
+    | _ :: path :: _ -> path
+    | _ -> "/"
+  in
+  let respond ~status ~content_type ~body =
+    let headers = Printf.sprintf
+      "HTTP/1.0 %s\r\nContent-Type: %s\r\nContent-Length: %d\r\nConnection: close\r\n\r\n"
+      status content_type (String.length body)
+    in
+    Eio.Flow.copy_string (headers ^ body) flow
+  in
+  let serve_file filename content_type =
+    let filepath = extension_dir ^ "/" ^ filename in
+    match Stdlib.In_channel.with_open_bin filepath Stdlib.In_channel.input_all with
+    | contents -> respond ~status:"200 OK" ~content_type ~body:contents
+    | exception _ -> respond ~status:"404 Not Found" ~content_type:"text/plain" ~body:"Not found"
+  in
+  match path with
+  | "/updates.xml" -> serve_file "updates.xml" "application/xml"
+  | "/extension.crx" -> serve_file "extension.crx" "application/x-chrome-extension"
+  | _ -> respond ~status:"404 Not Found" ~content_type:"text/plain" ~body:"Not found"
+
 let handle_connection inbox flow =
   let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
   match Eio.Buf_read.line reader with
   | exception (End_of_file | Eio.Io _) -> ()
   | line ->
-    log "req: %s" line;
-    (match Protocol.deserialize_request line with
-     | Error msg ->
-       let err_msg = Protocol.Wire.Response { id = 0; response = Err { message = msg } } in
-       let resp = Protocol.serialize_server_message err_msg in
-       log "res: %s" resp;
-       Eio.Flow.copy_string (resp ^ "\n") flow
-     | Ok req ->
-       let tenant = Option.value req.tenant ~default:"default" in
-       (match Protocol.command_of_wire req.command with
-        | Command (Register brand) ->
-          log "res[%s]: registering (brand=%s)" tenant
-            (Option.value brand ~default:"(none)");
-          handle_register inbox ~tenant ~brand ~register_id:req.id flow reader
-        | packed_cmd ->
-          let (promise, reply) = Eio.Promise.create () in
-          Eio.Stream.add inbox (Dispatch { id = req.id; command = packed_cmd; tenant; reply });
-          let response_line = Eio.Promise.await promise in
-          Eio.Flow.copy_string (response_line ^ "\n") flow))
+    (match String.is_prefix line ~prefix:"GET " || String.is_prefix line ~prefix:"HEAD " with
+     | true -> handle_http flow line
+     | false ->
+       log "req: %s" line;
+       (match Protocol.deserialize_request line with
+        | Error msg ->
+          let err_msg = Protocol.Wire.Response { id = 0; response = Err { message = msg } } in
+          let resp = Protocol.serialize_server_message err_msg in
+          log "res: %s" resp;
+          Eio.Flow.copy_string (resp ^ "\n") flow
+        | Ok req ->
+          let tenant = Option.value req.tenant ~default:"default" in
+          (match Protocol.command_of_wire req.command with
+           | Command (Register brand) ->
+             log "res[%s]: registering (brand=%s)" tenant
+               (Option.value brand ~default:"(none)");
+             handle_register inbox ~tenant ~brand ~register_id:req.id flow reader
+           | packed_cmd ->
+             let (promise, reply) = Eio.Promise.create () in
+             Eio.Stream.add inbox (Dispatch { id = req.id; command = packed_cmd; tenant; reply });
+             let response_line = Eio.Promise.await promise in
+             Eio.Flow.copy_string (response_line ^ "\n") flow)))
 
 (* -- Main *)
 
