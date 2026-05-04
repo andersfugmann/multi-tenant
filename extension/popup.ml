@@ -27,58 +27,32 @@ let set_footer ?(cls = "") (text : string) : unit =
   Page_util.set_class footer cls;
   Page_util.set_text footer text
 
-(* -- Yojson helpers -- *)
-
-let member key = function
-  | `Assoc pairs ->
-    (match List.Assoc.find pairs ~equal:String.equal key with
-     | Some v -> v
-     | None -> `Null)
-  | _ -> `Null
-
-let to_string_j = function `String s -> s | _ -> ""
-
-let to_string_list = function
-  | `List items -> List.filter_map items ~f:(function `String s -> Some s | _ -> None)
-  | _ -> []
-
 (* -- Send page to tenant -- *)
 
 let send_page_to (tenant : string) : unit =
   Page_util.query_active_tab ~on_result:(fun url tab_id ->
-    Page_util.send_message
-      (`Assoc [ ("action", `String "send_to");
-                ("target", `String tenant);
-                ("url", `String url) ])
+    Page_util.send_protocol_command (Open_on { target = tenant; url })
       ~on_response:(fun result ->
         match result with
-        | Ok json ->
-          (match member "ok" json with
-           | `Bool true ->
-             Chrome_api.Tabs.remove tab_id;
-             Dom_html.window##close
-           | _ ->
-             let msg = member "error" json |> to_string_j in
-             set_footer ~cls:"error" (Printf.sprintf "Error: %s" msg))
+        | Ok (Ok_route _) ->
+          Chrome_api.Tabs.remove tab_id;
+          Dom_html.window##close
+        | Ok (Err { message }) ->
+          set_footer ~cls:"error" (Printf.sprintf "Error: %s" message)
+        | Ok _ ->
+          set_footer ~cls:"error" "Unexpected response"
         | Error msg -> set_footer ~cls:"error" msg))
 
 (* -- Render tenants -- *)
 
-let render_tenants (json : Yojson.Safe.t) (self_id : string) : unit =
+let render_tenants (status : Protocol.status_info) (cfg : Protocol.config) (self_id : string) : unit =
   let registered_set =
-    member "registered_tenants" json
-    |> to_string_list
-    |> Set.of_list (module String)
+    Set.of_list (module String) status.registered_tenants
   in
   let config_tenants =
-    match member "tenants" json with
-    | `Assoc pairs ->
-      List.map pairs ~f:(fun (id, info) ->
-        let label = member "label" info |> to_string_j in
-        (id, label, Set.mem registered_set id))
-    | _ -> []
+    List.map cfg.tenants ~f:(fun (id, tc) ->
+      (id, tc.Protocol.label, Set.mem registered_set id))
   in
-  (* Add connected tenants not in config *)
   let config_ids =
     List.map config_tenants ~f:(fun (id, _, _) -> id)
     |> Set.of_list (module String)
@@ -149,32 +123,55 @@ let render_tenants (json : Yojson.Safe.t) (self_id : string) : unit =
 (* -- Load tenants on popup open -- *)
 
 let () =
-  (* Check active tab URL first to determine if actions should be enabled *)
   Page_util.query_active_tab ~on_result:(fun url _tab_id ->
     let is_internal = Page_util.is_internal_url url in
     page_is_internal := is_internal;
     Page_util.set_disabled btn_add_rule is_internal;
     Page_util.set_disabled btn_delete_rule is_internal;
-    (* Then fetch tenant data *)
-    Page_util.send_message
-      (`Assoc [ ("action", `String "query_tenants") ])
-      ~on_response:(fun result ->
-        match result with
-        | Error _ ->
-          set_status false "Not connected";
-          Page_util.set_html tenant_list
-            {|<li style="color:#5f6368">Not connected</li>|}
-        | Ok json ->
-          let registered = member "registered_tenants" json |> to_string_list in
-          let self_id = member "self_tenant_id" json |> to_string_j in
-          set_status (not (List.is_empty registered)) 
-            (match List.is_empty registered with
+    let status_ref = ref None in
+    let config_ref = ref None in
+    let self_id_ref = ref "" in
+    let pending = ref 3 in
+    let try_render () =
+      match !pending > 0 with
+      | true -> ()
+      | false ->
+        match (!status_ref, !config_ref) with
+        | (Some status, Some cfg) ->
+          let self = !self_id_ref in
+          set_status (not (List.is_empty status.Protocol.registered_tenants))
+            (match List.is_empty status.registered_tenants with
              | true -> "Disconnected"
              | false ->
-               match String.is_empty self_id with
-               | true -> Printf.sprintf "Connected (%d tenants)" (List.length registered)
-               | false -> Printf.sprintf "Connected as %s" self_id);
-          render_tenants json self_id))
+               match String.is_empty self with
+               | true -> Printf.sprintf "Connected (%d tenants)" (List.length status.registered_tenants)
+               | false -> Printf.sprintf "Connected as %s" self);
+          render_tenants status cfg self
+        | _ ->
+          set_status false "Disconnected";
+          Page_util.set_html tenant_list
+            {|<li style="color:#5f6368">Not connected</li>|}
+    in
+    Page_util.storage_get [ "tenant_name" ] ~on_result:(fun pairs ->
+      self_id_ref :=
+        (List.Assoc.find pairs ~equal:String.equal "tenant_name"
+         |> Option.value ~default:"");
+      pending := !pending - 1;
+      try_render ());
+    Page_util.send_protocol_command Status
+      ~on_response:(fun result ->
+        (match result with
+         | Ok (Ok_status info) -> status_ref := Some info
+         | _ -> ());
+        pending := !pending - 1;
+        try_render ());
+    Page_util.send_protocol_command Get_config
+      ~on_response:(fun result ->
+        (match result with
+         | Ok (Ok_config cfg) -> config_ref := Some cfg
+         | _ -> ());
+        pending := !pending - 1;
+        try_render ()))
 
 (* -- Add routing rule button -- *)
 
@@ -202,11 +199,13 @@ let () =
         ~on_response:(fun result ->
           match result with
           | Ok json ->
-            (match member "ok" json with
+            (match Yojson.Safe.Util.member "ok" json with
              | `Bool true -> set_footer ~cls:"success" "Rule deleted"
              | _ ->
-               let msg = member "error" json |> to_string_j in
-               set_footer ~cls:"error" msg)
+               let msg = Yojson.Safe.Util.member "error" json in
+               match msg with
+               | `String s -> set_footer ~cls:"error" s
+               | _ -> set_footer ~cls:"error" "Unknown error")
           | Error msg -> set_footer ~cls:"error" msg)))
 
 (* -- Configure button -- *)
@@ -226,7 +225,6 @@ let () =
         match result with
         | Error _ -> set_status false "Error reconnecting"
         | Ok json ->
-          let connected = member "connected" json in
-          (match connected with
-           | `Bool true -> set_status true "Reconnected"
-           | _ -> set_status false "Disconnected")))
+          match Yojson.Safe.Util.member "connected" json with
+          | `Bool true -> set_status true "Reconnected"
+          | _ -> set_status false "Disconnected"))

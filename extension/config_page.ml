@@ -2,6 +2,11 @@ open! Base
 open! Stdio
 open Js_of_ocaml
 
+let rec swap_nth n = function
+  | a :: b :: rest when n = 0 -> b :: a :: rest
+  | x :: rest -> x :: swap_nth (n - 1) rest
+  | l -> l
+
 (* -- Mutable state (required for async UI callbacks) -- *)
 
 let config : Protocol.config ref =
@@ -330,11 +335,7 @@ and render_rules () : unit =
         (match idx > 0 with
          | false -> ()
          | true ->
-           let arr = Array.of_list !config.rules in
-           let tmp = arr.(idx - 1) in
-           arr.(idx - 1) <- arr.(idx);
-           arr.(idx) <- tmp;
-           config := { !config with rules = Array.to_list arr };
+           config := { !config with rules = swap_nth (idx - 1) !config.rules };
            render_rules ()));
     Page_util.bind_clicks rule_list_el
       ~selector:"[data-move-rule-down]" ~attr:"data-move-rule-down"
@@ -343,11 +344,7 @@ and render_rules () : unit =
         (match idx < List.length !config.rules - 1 with
          | false -> ()
          | true ->
-           let arr = Array.of_list !config.rules in
-           let tmp = arr.(idx + 1) in
-           arr.(idx + 1) <- arr.(idx);
-           arr.(idx) <- tmp;
-           config := { !config with rules = Array.to_list arr };
+           config := { !config with rules = swap_nth idx !config.rules };
            render_rules ()))
 
 and edit_rule (idx : int) : unit =
@@ -437,20 +434,14 @@ let read_defaults () : unit =
 let save_config () : unit =
   read_defaults ();
   show_msg "Saving\u{2026}" "";
-  let config_json = Protocol.config_to_yojson !config in
-  Page_util.send_message
-    (`Assoc [ ("action", `String "set_config"); ("config", config_json) ])
+  Page_util.send_protocol_command (Set_config { config = !config })
     ~on_response:(fun result ->
       match result with
-      | Error msg -> show_msg (Printf.sprintf "Error: %s" msg) "error"
-      | Ok json ->
-        (match json with
-         | `Assoc pairs ->
-           (match List.Assoc.find pairs ~equal:String.equal "error" with
-            | Some (`String msg) ->
-              show_msg (Printf.sprintf "Error: %s" msg) "error"
-            | _ -> show_msg "Configuration saved." "success")
-         | _ -> show_msg "Configuration saved." "success"))
+      | Ok Ok_unit -> show_msg "Configuration saved." "success"
+      | Ok (Err { message }) ->
+        show_msg (Printf.sprintf "Error: %s" message) "error"
+      | Ok _ -> show_msg "Unexpected response" "error"
+      | Error msg -> show_msg (Printf.sprintf "Error: %s" msg) "error")
 
 (* -- Fetch config + status -- *)
 
@@ -474,56 +465,25 @@ let fetch_config () : unit =
          render_defaults ())
   in
 
-  Page_util.send_message
-    (`Assoc [ ("action", `String "query_config") ])
+  Page_util.send_protocol_command Get_config
     ~on_response:(fun result ->
       (match result with
-       | Ok json ->
-         let connected =
-           match json with
-           | `Assoc pairs ->
-             (match List.Assoc.find pairs ~equal:String.equal "connected" with
-              | Some (`Bool b) -> b
-              | _ -> false)
-           | _ -> false
-         in
-         set_status connected;
-         let data =
-           match json with
-           | `Assoc pairs ->
-             (match List.Assoc.find pairs ~equal:String.equal "data" with
-              | Some v -> v
-              | None -> `Null)
-           | _ -> `Null
-         in
-         (match Protocol.Wire.response_of_yojson data with
-          | Ok (Ok_config cfg) ->
-            config := cfg;
-            config_ok := true
-          | _ -> ())
-       | Error _ -> ());
+       | Ok (Ok_config cfg) ->
+         set_status true;
+         config := cfg;
+         config_ok := true
+       | Ok (Err _) -> set_status false
+       | _ -> ());
       pending := !pending - 1;
       finish_init ());
 
-  Page_util.send_message
-    (`Assoc [ ("action", `String "query_status") ])
+  Page_util.send_protocol_command Status
     ~on_response:(fun result ->
       (match result with
-       | Ok json ->
-         let data =
-           match json with
-           | `Assoc pairs ->
-             (match List.Assoc.find pairs ~equal:String.equal "data" with
-              | Some v -> v
-              | None -> `Null)
-           | _ -> `Null
-         in
-         (match Protocol.Wire.response_of_yojson data with
-          | Ok (Ok_status info) ->
-            connected_tenants :=
-              Set.of_list (module String) info.registered_tenants
-          | _ -> ())
-       | Error _ -> ());
+       | Ok (Ok_status info) ->
+         connected_tenants :=
+           Set.of_list (module String) info.registered_tenants
+       | _ -> ());
       pending := !pending - 1;
       finish_init ())
 

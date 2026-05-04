@@ -16,6 +16,17 @@ let send_message (msg : Yojson.Safe.t)
          | json -> on_response (Ok json)
          | exception _ -> on_response (Error "invalid JSON response")))
 
+let send_protocol_command (cmd : Protocol.Wire.command)
+    ~(on_response : (Protocol.Wire.response, string) Result.t -> unit) : unit =
+  let msg = `Assoc [ ("cmd", Protocol.Wire.command_to_yojson cmd) ] in
+  send_message msg ~on_response:(fun result ->
+    match result with
+    | Error e -> on_response (Error e)
+    | Ok json ->
+      match Protocol.Wire.response_of_yojson json with
+      | Ok resp -> on_response (Ok resp)
+      | Error msg -> on_response (Error msg))
+
 let storage_get (keys : string list)
     ~(on_result : (string * string) list -> unit) : unit =
   Chrome_api.Storage.get_local keys ~on_result

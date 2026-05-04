@@ -28,38 +28,11 @@ let () =
 (* -- Fetch tenants from config -- *)
 
 let () =
-  Page_util.send_message
-    (`Assoc [ ("action", `String "query_config") ])
+  Page_util.send_protocol_command Get_config
     ~on_response:(fun result ->
       match result with
-      | Error _ | Ok `Null ->
-        Page_util.set_html
-          (tenant_select :> Dom_html.element Js.t)
-          {|<option value="">Failed to load</option>|}
-      | Ok json ->
-        let data =
-          match json with
-          | `Assoc pairs ->
-            (match List.Assoc.find pairs ~equal:String.equal "data" with
-             | Some v -> v
-             | None -> `Null)
-          | _ -> `Null
-        in
-        (* Wire format: ["Ok_config", { tenants: ... }] *)
-        let config =
-          match data with
-          | `List [ `String "Ok_config"; payload ] -> Some payload
-          | _ -> None
-        in
-        let tenants =
-          match config with
-          | Some (`Assoc pairs) ->
-            (match List.Assoc.find pairs ~equal:String.equal "tenants" with
-             | Some (`Assoc ts) -> ts
-             | _ -> [])
-          | _ -> []
-        in
-        (match List.is_empty tenants with
+      | Ok (Ok_config cfg) ->
+        (match List.is_empty cfg.tenants with
          | true ->
            Page_util.set_html
              (tenant_select :> Dom_html.element Js.t)
@@ -67,20 +40,21 @@ let () =
          | false ->
            Page_util.set_html (tenant_select :> Dom_html.element Js.t) "";
            let doc = Dom_html.document in
-           List.iter tenants ~f:(fun (name, info) ->
+           List.iter cfg.tenants ~f:(fun (name, tc) ->
              let label =
-               match info with
-               | `Assoc pairs ->
-                 (match List.Assoc.find pairs ~equal:String.equal "label" with
-                  | Some (`String s) -> s
-                  | _ -> name)
-               | _ -> name
+               match String.is_empty tc.Protocol.label with
+               | true -> name
+               | false -> tc.label
              in
              let opt =
                Page_util.create_option doc ~value:name ~text:label
                  ~selected:false
              in
-             Dom.appendChild tenant_select opt)))
+             Dom.appendChild tenant_select opt))
+      | _ ->
+        Page_util.set_html
+          (tenant_select :> Dom_html.element Js.t)
+          {|<option value="">Failed to load</option>|})
 
 (* -- Cancel button -- *)
 
@@ -107,26 +81,18 @@ let () =
             Page_util.set_text error_div
               (Printf.sprintf "Invalid regex: %s" msg)
           | Ok () ->
-            Page_util.send_message
-              (`Assoc
-                 [
-                   ("action", `String "add_rule");
-                   ("pattern", `String pattern);
-                   ("target", `String tenant);
-                 ])
+            let rule : Protocol.rule =
+              { pattern; target = tenant; enabled = true }
+            in
+            Page_util.send_protocol_command (Add_rule { rule })
               ~on_response:(fun result ->
                 match result with
+                | Ok Ok_unit -> Dom_html.window##close
+                | Ok (Err { message }) ->
+                  Page_util.set_text error_div
+                    (Printf.sprintf "Error: %s" message)
+                | Ok _ ->
+                  Page_util.set_text error_div "Unexpected response"
                 | Error msg ->
                   Page_util.set_text error_div
-                    (Printf.sprintf "Error: %s" msg)
-                | Ok json ->
-                  (match json with
-                   | `Assoc pairs ->
-                     (match
-                        List.Assoc.find pairs ~equal:String.equal "error"
-                      with
-                      | Some (`String msg) ->
-                        Page_util.set_text error_div
-                          (Printf.sprintf "Error: %s" msg)
-                      | _ -> Dom_html.window##close)
-                   | _ -> Dom_html.window##close)))))
+                    (Printf.sprintf "Error: %s" msg)))))

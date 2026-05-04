@@ -315,93 +315,13 @@ let handle_context_menu (state : state) (menu_id : string)
            | _ -> log "Unexpected response for Test"))
   | _ -> state
 
-let handle_popup_query (state : state) (json : Yojson.Safe.t)
+let handle_local_action (state : state) (json : Yojson.Safe.t)
     (respond : Yojson.Safe.t -> unit) : state =
-  let connected = is_connected state in
   match string_field json "action" with
-  | Ok "get_status" ->
-    (match connected with
-     | false ->
-       respond (`Assoc [ ("connected", `Bool false) ]);
-       state
-     | true ->
-       send_command state (Command Status) (fun wire_resp ->
-           match wire_resp with
-           | Protocol.Wire.Ok_status info ->
-             respond (`Assoc [ ("connected", `Bool true);
-                               ("registered_tenants", `List (List.map info.registered_tenants ~f:(fun s -> `String s))) ])
-           | Err { message } ->
-             respond (`Assoc [ ("connected", `Bool false); ("error", `String message) ])
-           | _ ->
-             respond (`Assoc [ ("connected", `Bool false); ("error", `String "unexpected response") ])))
-  | Ok "query_tenants" ->
-    (match connected with
-     | false ->
-       respond (`Assoc [ ("registered_tenants", `List []); ("tenants", `Assoc []) ]);
-       state
-     | true ->
-       let status_ref = ref None in
-       let config_ref = ref None in
-       let pending = ref 2 in
-       let try_respond () =
-         match !pending > 0 with
-         | true -> ()
-         | false ->
-           let registered =
-             match !status_ref with
-             | Some info -> info.Protocol.registered_tenants
-             | None -> []
-           in
-           let tenants =
-             match !config_ref with
-             | Some cfg -> cfg.Protocol.tenants
-             | None -> []
-            in
-            let self = Option.value state.self_tenant_id ~default:"" in
-            respond (`Assoc [
-              ("self_tenant_id", `String self);
-              ("registered_tenants", `List (List.map registered ~f:(fun s -> `String s)));
-              ("tenants", `Assoc (List.map tenants ~f:(fun (id, tc) ->
-                (id, `Assoc [
-                  ("label", `String tc.Protocol.label);
-                  ("brand", match tc.brand with Some b -> `String b | None -> `Null);
-                ]))))
-            ])
-       in
-       let state = send_command state (Command Status) (fun wire_resp ->
-           (match wire_resp with
-            | Protocol.Wire.Ok_status info -> status_ref := Some info
-            | _ -> ());
-           pending := !pending - 1;
-           try_respond ())
-       in
-       send_command state (Command Get_config) (fun wire_resp ->
-           (match wire_resp with
-            | Protocol.Wire.Ok_config cfg -> config_ref := Some cfg
-            | _ -> ());
-           pending := !pending - 1;
-           try_respond ()))
-  | Ok "send_to" ->
-    let target =
-      match string_field json "target" with
-      | Ok s -> s
-      | Error _ -> ""
-    in
-    let url =
-      match string_field json "url" with
-      | Ok s -> s
-      | Error _ -> ""
-    in
-    (match String.is_empty target || String.is_empty url with
-     | true ->
-       respond (`Assoc [ ("error", `String "target and url required") ]);
-       state
-     | false ->
-       send_command state (Command (Open_on (target, url))) (fun wire_resp ->
-           match wire_resp with
-           | Protocol.Wire.Ok_route _ -> respond (`Assoc [ ("ok", `Bool true) ])
-           | Err { message } -> respond (`Assoc [ ("error", `String message) ])
-           | _ -> respond (`Assoc [ ("error", `String "unexpected response") ])))
+  | Ok "reconnect" ->
+    let state = connect state in
+    respond (`Assoc [ ("connected", `Bool (is_connected state)) ]);
+    state
   | Ok "delete_matching_rule" ->
     let url =
       match string_field json "url" with
@@ -424,71 +344,6 @@ let handle_popup_query (state : state) (json : Yojson.Safe.t)
              respond (`Assoc [ ("error", `String message) ])
            | _ ->
              respond (`Assoc [ ("error", `String "unexpected response") ])))
-  | Ok "reconnect" ->
-    let state = connect state in
-    respond (`Assoc [ ("connected", `Bool (is_connected state)) ]);
-    state
-  | Ok "add_rule" ->
-    let pattern =
-      match string_field json "pattern" with
-      | Ok s -> s
-      | Error _ -> ""
-    in
-    let target =
-      match string_field json "target" with
-      | Ok s -> s
-      | Error _ -> ""
-    in
-    (match String.is_empty pattern || String.is_empty target with
-     | true ->
-       respond (`Assoc [ ("error", `String "pattern and target required") ]);
-       state
-     | false ->
-       let rule : Protocol.rule =
-         { pattern; target; enabled = true }
-       in
-       send_command state (Command (Add_rule rule)) (fun wire_resp ->
-           match wire_resp with
-           | Protocol.Wire.Ok_unit -> respond (`Assoc [ ("ok", `Bool true) ])
-           | Err { message } ->
-             respond (`Assoc [ ("error", `String message) ])
-           | _ ->
-             respond (`Assoc [ ("error", `String "unexpected response") ])))
-  | Ok "query_status" ->
-    send_command state (Command Status) (fun wire_resp ->
-        respond
-          (`Assoc
-             [
-               ("connected", `Bool connected);
-               ("data", Protocol.Wire.response_to_yojson wire_resp);
-             ]))
-  | Ok "query_config" ->
-    send_command state (Command Get_config) (fun wire_resp ->
-        respond
-          (`Assoc
-             [
-               ("connected", `Bool connected);
-               ("data", Protocol.Wire.response_to_yojson wire_resp);
-             ]))
-  | Ok "set_config" ->
-    (match Yojson.Safe.Util.member "config" json with
-     | `Null ->
-       respond (`Assoc [ ("error", `String "config field required") ]);
-       state
-     | config_json ->
-       (match Protocol.config_of_yojson config_json with
-        | Error msg ->
-          respond (`Assoc [ ("error", `String msg) ]);
-          state
-        | Ok cfg ->
-          send_command state (Command (Set_config cfg)) (fun wire_resp ->
-              match wire_resp with
-              | Protocol.Wire.Ok_unit ->
-                respond (`Assoc [ ("ok", `Bool true) ])
-              | Err { message } ->
-                respond (`Assoc [ ("error", `String message) ])
-              | _ ->
-                respond (`Assoc [ ("error", `String "unexpected response") ]))))
   | Ok other ->
     log (Printf.sprintf "Unknown popup action: %s" other);
     respond (`Assoc [ ("error", `String "unknown action") ]);
@@ -496,6 +351,25 @@ let handle_popup_query (state : state) (json : Yojson.Safe.t)
   | Error _ ->
     respond (`Assoc [ ("error", `String "invalid message") ]);
     state
+
+let handle_popup_query (state : state) (json : Yojson.Safe.t)
+    (respond : Yojson.Safe.t -> unit) : state =
+  (* Protocol command passthrough: {"cmd": <Wire.command>} *)
+  match Yojson.Safe.Util.member "cmd" json with
+  | `Null -> handle_local_action state json respond
+  | cmd_json ->
+    match Protocol.Wire.command_of_yojson cmd_json with
+    | Error msg ->
+      respond (Protocol.Wire.response_to_yojson (Err { message = msg }));
+      state
+    | Ok wire_cmd ->
+      match is_connected state with
+      | false ->
+        respond (Protocol.Wire.response_to_yojson (Err { message = "Not connected" }));
+        state
+      | true ->
+        send_request state wire_cmd (fun wire_resp ->
+          respond (Protocol.Wire.response_to_yojson wire_resp))
 
 let setup_context_menus (tenants : (string * string * bool) list) (self_id : string option) : unit =
   remove_all_context_menus (fun () ->
