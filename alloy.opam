@@ -11,6 +11,7 @@ depends: [
   "ppx_jane" {>= "v0.17"}
   "eio" {>= "1.0"}
   "eio_main" {>= "1.0"}
+  "cohttp-eio" {>= "6.0"}
   "re" {>= "1.0"}
   "js_of_ocaml" {>= "5.0"}
   "js_of_ocaml-lwt" {>= "5.0"}

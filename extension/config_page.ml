@@ -8,6 +8,7 @@ let config : Protocol.config ref =
   ref
     Protocol.{
       listen = default_listen;
+      http_port = default_http_port;
       allowed_networks = default_allowed_networks;
       tenants = [];
       rules = [];

@@ -25,6 +25,8 @@
    (>= 1.0))
   (eio_main
    (>= 1.0))
+  (cohttp-eio
+   (>= 6.0))
   (re
    (>= 1.0))
   (js_of_ocaml

@@ -48,9 +48,11 @@ type defaults = {
 [@@deriving yojson]
 
 val default_listen : string list
+val default_http_port : int
 
 type config = {
   listen : string list;
+  http_port : int;
   allowed_networks : string list;
   tenants : (string * tenant_config) list;
   rules : rule list;

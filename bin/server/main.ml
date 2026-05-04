@@ -53,6 +53,7 @@ type coordinator_msg =
 let default_config () : Protocol.config =
   {
     listen = Protocol.default_listen;
+    http_port = Protocol.default_http_port;
     allowed_networks = Protocol.default_allowed_networks;
     tenants = [];
     rules = [];
@@ -511,58 +512,57 @@ let handle_register inbox ~tenant ~brand ~register_id flow reader =
 
 let extension_dir = "/usr/share/alloy"
 
-let handle_http flow (request_line : string) =
-  (* Minimal HTTP/1.0 handler for extension update checks *)
-  let path =
-    match String.split request_line ~on:' ' with
-    | _ :: path :: _ -> path
-    | _ -> "/"
-  in
-  let respond ~status ~content_type ~body =
-    let headers = Printf.sprintf
-      "HTTP/1.0 %s\r\nContent-Type: %s\r\nContent-Length: %d\r\nConnection: close\r\n\r\n"
-      status content_type (String.length body)
-    in
-    Eio.Flow.copy_string (headers ^ body) flow
-  in
-  let serve_file filename content_type =
-    let filepath = extension_dir ^ "/" ^ filename in
-    match Stdlib.In_channel.with_open_bin filepath Stdlib.In_channel.input_all with
-    | contents -> respond ~status:"200 OK" ~content_type ~body:contents
-    | exception _ -> respond ~status:"404 Not Found" ~content_type:"text/plain" ~body:"Not found"
-  in
-  match path with
-  | "/updates.xml" -> serve_file "updates.xml" "application/xml"
-  | "/extension.crx" -> serve_file "extension.crx" "application/x-chrome-extension"
-  | _ -> respond ~status:"404 Not Found" ~content_type:"text/plain" ~body:"Not found"
-
 let handle_connection inbox flow =
   let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
   match Eio.Buf_read.line reader with
   | exception (End_of_file | Eio.Io _) -> ()
   | line ->
-    (match String.is_prefix line ~prefix:"GET " || String.is_prefix line ~prefix:"HEAD " with
-     | true -> handle_http flow line
-     | false ->
-       log "req: %s" line;
-       (match Protocol.deserialize_request line with
-        | Error msg ->
-          let err_msg = Protocol.Wire.Response { id = 0; response = Err { message = msg } } in
-          let resp = Protocol.serialize_server_message err_msg in
-          log "res: %s" resp;
-          Eio.Flow.copy_string (resp ^ "\n") flow
-        | Ok req ->
-          let tenant = Option.value req.tenant ~default:"default" in
-          (match Protocol.command_of_wire req.command with
-           | Command (Register brand) ->
-             log "res[%s]: registering (brand=%s)" tenant
-               (Option.value brand ~default:"(none)");
-             handle_register inbox ~tenant ~brand ~register_id:req.id flow reader
-           | packed_cmd ->
-             let (promise, reply) = Eio.Promise.create () in
-             Eio.Stream.add inbox (Dispatch { id = req.id; command = packed_cmd; tenant; reply });
-             let response_line = Eio.Promise.await promise in
-             Eio.Flow.copy_string (response_line ^ "\n") flow)))
+    log "req: %s" line;
+    (match Protocol.deserialize_request line with
+     | Error msg ->
+       let err_msg = Protocol.Wire.Response { id = 0; response = Err { message = msg } } in
+       let resp = Protocol.serialize_server_message err_msg in
+       log "res: %s" resp;
+       Eio.Flow.copy_string (resp ^ "\n") flow
+     | Ok req ->
+       let tenant = Option.value req.tenant ~default:"default" in
+       (match Protocol.command_of_wire req.command with
+        | Command (Register brand) ->
+          log "res[%s]: registering (brand=%s)" tenant
+            (Option.value brand ~default:"(none)");
+          handle_register inbox ~tenant ~brand ~register_id:req.id flow reader
+        | packed_cmd ->
+          let (promise, reply) = Eio.Promise.create () in
+          Eio.Stream.add inbox (Dispatch { id = req.id; command = packed_cmd; tenant; reply });
+          let response_line = Eio.Promise.await promise in
+          Eio.Flow.copy_string (response_line ^ "\n") flow))
+
+(* -- HTTP server for extension updates *)
+
+let serve_file path content_type =
+  match Stdlib.In_channel.with_open_bin path Stdlib.In_channel.input_all with
+  | contents ->
+    let headers = Cohttp.Header.of_list [ ("content-type", content_type) ] in
+    Cohttp_eio.Server.respond_string ~status:`OK ~headers ~body:contents ()
+  | exception _ ->
+    Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"Not found" ()
+
+let http_handler _conn request _body =
+  let path = Http.Request.resource request in
+  match path with
+  | "/updates.xml" -> serve_file (extension_dir ^ "/updates.xml") "application/xml"
+  | "/extension.crx" -> serve_file (extension_dir ^ "/extension.crx") "application/x-chrome-extension"
+  | _ -> Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"Not found" ()
+
+let run_http_server ~sw net ~port =
+  let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, port) in
+  match Eio.Net.listen ~sw ~backlog:16 ~reuse_addr:true net addr with
+  | listener ->
+    log "HTTP server listening on 127.0.0.1:%d" port;
+    let server = Cohttp_eio.Server.make ~callback:http_handler () in
+    Cohttp_eio.Server.run ~on_error:(fun _exn -> ()) listener server
+  | exception exn ->
+    log "warning: failed to start HTTP server on port %d: %s" port (Exn.to_string exn)
 
 (* -- Main *)
 
@@ -658,6 +658,7 @@ let run config_path =
    | _ -> ());
   Eio.Fiber.all
     ((fun () -> coordinator_loop initial_state inbox ~sw ~clock)
+     :: (fun () -> run_http_server ~sw net ~port:config.http_port)
      :: List.map listeners ~f:(fun l -> fun () -> accept_loop l))
 
 let () =

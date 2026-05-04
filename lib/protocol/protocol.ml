@@ -192,9 +192,11 @@ let tenants_of_yojson (json : Yojson.Safe.t) :
   | _ -> Error "tenants: expected JSON object"
 
 let default_listen = [ "127.0.0.1:7120"; "[::1]:7120" ]
+let default_http_port = 7121
 
 type config = {
   listen : string list; [@default default_listen]
+  http_port : int; [@default default_http_port]
   allowed_networks : string list; [@default default_allowed_networks]
   tenants : (string * tenant_config) list;
       [@to_yojson tenants_to_yojson] [@of_yojson tenants_of_yojson]
@@ -405,6 +407,7 @@ let%expect_test "sample data" =
 let[@warning "-32"] sample_config =
   {
     listen = [ "127.0.0.1:7120"; "[::1]:7120" ];
+    http_port = default_http_port;
     allowed_networks = default_allowed_networks;
     tenants =
       [
@@ -552,6 +555,7 @@ let%expect_test "json: server_message push" =
 let%expect_test "json: server_message push config_updated" =
   let cfg : config = {
     listen = ["127.0.0.1:7120"];
+    http_port = default_http_port;
     allowed_networks = ["127.0.0.0/8"];
     tenants = [("work", { browser_cmd = None; label = "Work"; color = "#ff0000"; brand = None })];
     rules = [];
