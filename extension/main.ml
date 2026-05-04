@@ -293,22 +293,25 @@ let handle_context_menu (state : state) (menu_id : string)
        send_command state (Command (Open_on (target, page_url)))
          (fun _resp -> Option.iter tab_id ~f:Chrome_api.Tabs.remove))
   | _ ->
+  let url =
+    match String.is_empty link_url with
+    | true -> page_url
+    | false -> link_url
+  in
   match menu_id with
   | "add_rule" ->
-    let encoded_url =
-      page_url |> Js.string |> Js.encodeURIComponent |> Js.to_string
-    in
-    let dialog_url =
-      Printf.sprintf "add_rule.html?url=%s" encoded_url
-    in
-    Chrome_api.Windows.create_popup ~url:dialog_url ~width:420 ~height:300;
-    state
+    (match String.is_empty url with
+     | true -> state
+     | false ->
+       let encoded_url =
+         url |> Js.string |> Js.encodeURIComponent |> Js.to_string
+       in
+       let dialog_url =
+         Printf.sprintf "add_rule.html?url=%s" encoded_url
+       in
+       Chrome_api.Windows.create_popup ~url:dialog_url ~width:420 ~height:300;
+       state)
   | "delete_rule" ->
-    let url =
-      match String.is_empty page_url with
-      | true -> link_url
-      | false -> page_url
-    in
     (match String.is_empty url with
      | true -> state
      | false ->
@@ -524,8 +527,8 @@ let setup_context_menus (tenants : (string * string * bool) list) (self_id : str
       create_child_context_menu
         ~id:(Printf.sprintf "send_to:%s" tid) ~parent_id:"send_to"
         ~title ~contexts:[ "page" ] ~enabled ());
-    create_context_menu ~id:"add_rule" ~title:"Add rule" ~contexts:[ "page" ];
-    create_context_menu ~id:"delete_rule" ~title:"Delete matching rule" ~contexts:[ "page" ])
+    create_context_menu ~id:"add_rule" ~title:"Add rule" ~contexts:[ "page"; "link" ];
+    create_context_menu ~id:"delete_rule" ~title:"Delete matching rule" ~contexts:[ "page"; "link" ])
 
 let handle_delete_rule_at (state : state) (index : int) : state =
   send_command state (Command (Delete_rule index)) (fun wire_resp ->
