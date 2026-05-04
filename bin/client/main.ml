@@ -368,11 +368,11 @@ let run_bridge env =
     | None -> None
     | Some json ->
       (match Protocol.Wire.request_of_yojson json with
-       | Ok { command = Register { brand = _; address; name }; _ } ->
+       | Ok { command = Register { brand; address; name }; _ } ->
          let tenant = Option.value name ~default:default_tenant in
          let patched : Protocol.Wire.request = {
            id = 0;
-           command = Register { brand = None; address = None; name = Some tenant };
+           command = Register { brand; address = None; name = Some tenant };
            tenant = Some tenant;
          } in
          Some (tenant, address, Protocol.serialize_request patched)

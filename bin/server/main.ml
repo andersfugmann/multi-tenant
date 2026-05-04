@@ -220,10 +220,14 @@ let handle_open state tenant url ~sw ~clock ~inbox =
       { key = cooldown_key; expires = now +. cooldown } :: state.cooldowns
   in
   let state = { state with cooldowns } in
-  deliver_url state target url ~sw ~clock ~inbox
+  match String.equal target "local" with
+  | true -> (state, Eio.Promise.create_resolved (Ok Protocol.Local))
+  | false -> deliver_url state target url ~sw ~clock ~inbox
 
 let handle_open_on state target url ~sw ~clock ~inbox =
-  deliver_url state target url ~sw ~clock ~inbox
+  match String.equal target "local" with
+  | true -> (state, Eio.Promise.create_resolved (Ok Protocol.Local))
+  | false -> deliver_url state target url ~sw ~clock ~inbox
 
 let handle_test state url =
   let result =
