@@ -53,7 +53,7 @@ type coordinator_msg =
 let default_config () : Protocol.config =
   {
     listen = Protocol.default_listen;
-    http_port = Protocol.default_http_port;
+
     allowed_networks = Protocol.default_allowed_networks;
     tenants = [];
     rules = [];
@@ -510,8 +510,6 @@ let handle_register inbox ~tenant ~brand ~register_id flow reader =
 
 (* -- Connection handling *)
 
-let extension_dir = "/usr/share/alloy"
-
 let handle_connection inbox flow =
   let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
   match Eio.Buf_read.line reader with
@@ -536,38 +534,6 @@ let handle_connection inbox flow =
           Eio.Stream.add inbox (Dispatch { id = req.id; command = packed_cmd; tenant; reply });
           let response_line = Eio.Promise.await promise in
           Eio.Flow.copy_string (response_line ^ "\n") flow))
-
-(* -- HTTP server for extension updates *)
-
-let serve_file path content_type =
-  match Stdlib.In_channel.with_open_bin path Stdlib.In_channel.input_all with
-  | contents ->
-    let headers = Cohttp.Header.of_list [ ("content-type", content_type) ] in
-    Cohttp_eio.Server.respond_string ~status:`OK ~headers ~body:contents ()
-  | exception _ ->
-    Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"Not found" ()
-
-let http_handler _conn request _body =
-  let resource = Http.Request.resource request in
-  let path =
-    match String.lsplit2 resource ~on:'?' with
-    | Some (p, _) -> p
-    | None -> resource
-  in
-  match path with
-  | "/updates.xml" -> serve_file (extension_dir ^ "/updates.xml") "application/xml"
-  | "/extension.crx" -> serve_file (extension_dir ^ "/extension.crx") "application/x-chrome-extension"
-  | _ -> Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"Not found" ()
-
-let run_http_server ~sw net ~port =
-  let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, port) in
-  match Eio.Net.listen ~sw ~backlog:16 ~reuse_addr:true net addr with
-  | listener ->
-    log "HTTP server listening on 127.0.0.1:%d" port;
-    let server = Cohttp_eio.Server.make ~callback:http_handler () in
-    Cohttp_eio.Server.run ~on_error:(fun _exn -> ()) listener server
-  | exception exn ->
-    log "warning: failed to start HTTP server on port %d: %s" port (Exn.to_string exn)
 
 (* -- Main *)
 
@@ -663,7 +629,6 @@ let run config_path =
    | _ -> ());
   Eio.Fiber.all
     ((fun () -> coordinator_loop initial_state inbox ~sw ~clock)
-     :: (fun () -> run_http_server ~sw net ~port:config.http_port)
      :: List.map listeners ~f:(fun l -> fun () -> accept_loop l))
 
 let () =

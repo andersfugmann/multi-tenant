@@ -1,7 +1,5 @@
 #!/usr/bin/make -f
 
-EXT_ID := jhejkohfkfaeidbbnhjkicadefnapedo
-
 %:
 	dh $@
 
@@ -17,8 +15,6 @@ override_dh_auto_build:
 	cp _build/default/extension/options_page.bc.js _build/ext-staging/options.js
 	cp _build/default/extension/add_rule_page.bc.js _build/ext-staging/add_rule.js
 	cp extension/icons/* _build/ext-staging/icons/
-	cd extension && npx crx3 ../_build/ext-staging \
-		--crxPath ../_build/extension.crx --keyPath key.pem
 
 override_dh_auto_test:
 
@@ -40,21 +36,9 @@ override_dh_auto_install:
 	mkdir -p debian/alloy/etc/opt/edge/native-messaging-hosts
 	ln -sf /usr/share/alloy/alloy.json \
 		debian/alloy/etc/opt/edge/native-messaging-hosts/alloy.json
-	# Edge extension descriptor (external_update_url via HTTP)
-	install -D -m 644 debian/$(EXT_ID).json \
-		debian/alloy/usr/share/alloy/$(EXT_ID).json
-	for variant in msedge msedge-beta msedge-dev msedge-canary; do \
-		mkdir -p debian/alloy/opt/microsoft/$$variant/extensions; \
-		ln -sf /usr/share/alloy/$(EXT_ID).json \
-			debian/alloy/opt/microsoft/$$variant/extensions/$(EXT_ID).json; \
-	done
-	# Chromium/Chrome: install unpacked extension for "Load unpacked" or external_crx
+	# Unpacked extension for all browsers (load via "Load unpacked")
 	mkdir -p debian/alloy/usr/share/alloy/extension
 	cp -r _build/ext-staging/* debian/alloy/usr/share/alloy/extension/
-	install -D -m 644 _build/extension.crx \
-		debian/alloy/usr/share/alloy/extension.crx
-	install -D -m 644 debian/updates.xml \
-		debian/alloy/usr/share/alloy/updates.xml
 	install -D -m 644 debian/alloy.desktop \
 		debian/alloy/usr/share/applications/alloy.desktop
 	install -D -m 644 config.example.json \
@@ -62,7 +46,7 @@ override_dh_auto_install:
 
 override_dh_auto_clean:
 	dune clean
-	rm -rf _build/ext-staging _build/extension.crx
+	rm -rf _build/ext-staging
 
 override_dh_dwz:
 override_dh_strip:

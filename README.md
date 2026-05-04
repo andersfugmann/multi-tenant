@@ -75,15 +75,9 @@ sudo dpkg -i alloy_<version>_amd64.deb
 Installs the bridge/CLI, native messaging manifests (Chromium and Edge),
 and a `.desktop` entry for use as the default URL handler.
 
-**Microsoft Edge:** The extension auto-installs on next browser launch
-via the signed `.crx` and Edge's
-[external extension](https://developer.chrome.com/docs/extensions/how-to/distribute/install-extensions-linux)
-mechanism.
+**Browser extension (all browsers):** Load the extension manually:
 
-**Chromium / Google Chrome:** Auto-install is not supported. Load the
-extension manually:
-
-1. Open `chrome://extensions`
+1. Open `chrome://extensions` (or `edge://extensions`)
 2. Enable **Developer mode** (toggle in top-right)
 3. Click **Load unpacked**
 4. Select `/usr/share/alloy/extension`

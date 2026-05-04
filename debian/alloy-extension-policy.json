@@ -1,8 +1,0 @@
-{
-  "ExtensionInstallForcelist": [
-    "jhejkohfkfaeidbbnhjkicadefnapedo;http://127.0.0.1:7121/updates.xml"
-  ],
-  "ExtensionInstallSources": [
-    "http://127.0.0.1:7121/*"
-  ]
-}
