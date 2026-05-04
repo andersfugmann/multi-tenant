@@ -361,6 +361,18 @@ let push_to_wire (push : packed_server_push) : Wire.push =
   | Push (Config_updated (cfg, registered)) ->
     Config_updated { config = cfg; registered_tenants = registered }
 
+let wire_command_name : Wire.command -> string = function
+  | Register _ -> "Register"
+  | Open _ -> "Open"
+  | Open_on _ -> "Open_on"
+  | Test _ -> "Test"
+  | Get_config -> "Get_config"
+  | Set_config _ -> "Set_config"
+  | Add_rule _ -> "Add_rule"
+  | Update_rule _ -> "Update_rule"
+  | Delete_rule _ -> "Delete_rule"
+  | Status -> "Status"
+
 let serialize_server_message (msg : Wire.server_message) : string =
   Wire.server_message_to_yojson msg |> Yojson.Safe.to_string
 

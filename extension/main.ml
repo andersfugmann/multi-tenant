@@ -114,8 +114,9 @@ let send_request (state : state) (cmd : Protocol.Wire.command)
     state
   | Some p ->
     let id = state.next_id in
-    let json = Protocol.Wire.command_to_yojson cmd in
-    Chrome_api.Port.post_message_json p (json_to_string json);
+    let req : Protocol.Wire.request = { id; command = cmd; tenant = None } in
+    log (Printf.sprintf "→ %s id=%d" (Protocol.wire_command_name cmd) id);
+    Chrome_api.Port.post_message_json p (json_to_string (Protocol.Wire.request_to_yojson req));
     { state with
       next_id = id + 1;
       pending = Map.set state.pending ~key:id ~data:on_response }
@@ -146,14 +147,15 @@ let connect_with_settings (port : native_port) (tenant_name : string) (daemon_ho
     (Option.value name ~default:"(default)")
     (Option.value address ~default:"(default)"));
   let state = { native_port = Some port; next_id = 1; pending = Map.empty (module Int); tenant_names = []; self_tenant_id = None; debug_logging } in
-  let register_cmd : Protocol.Wire.command =
-    Register { brand; address; name }
-  in
-  send_request state register_cmd (fun wire_resp ->
-    match wire_resp with
-    | Protocol.Wire.Ok_registered { tenant_id } ->
-      push (Self_registered { tenant_id })
-    | _ -> log "Unexpected response for Register command")
+  (* Register uses id=0: response handled by id=0 handler, not pending map *)
+  let register_req : Protocol.Wire.request = {
+    id = 0;
+    command = Register { brand; address; name };
+    tenant = name;
+  } in
+  log "→ Register id=0";
+  Chrome_api.Port.post_message_json port (json_to_string (Protocol.Wire.request_to_yojson register_req));
+  state
 
 let connect (_state : state) : state =
   match
@@ -180,7 +182,8 @@ let connect (_state : state) : state =
                daemon_port = find "daemon_port";
                debug_logging = String.equal (find "debug_logging") "true";
              }));
-    { native_port = Some p; next_id = 1; pending = Map.empty (module Int); tenant_names = []; self_tenant_id = None; debug_logging = false }
+    (* native_port stays None until connect_with_settings — prevents race *)
+    initial_state
   | exception exn ->
     log (Printf.sprintf "Failed to connect: %s" (Exn.to_string exn));
     initial_state
@@ -223,8 +226,21 @@ let handle_bridge_message (state : state) (raw : string) : state =
     state
   | Ok json ->
     (match Protocol.Wire.server_message_of_yojson json with
+     | Ok (Push { id = _; push = p }) ->
+       handle_push state p
+     | Ok (Response { id = 0; response }) ->
+       (* id=0: registration response *)
+       (match response with
+        | Ok_registered { tenant_id } ->
+          log (Printf.sprintf "← Registered id=0: %s" tenant_id);
+          push (Self_registered { tenant_id })
+        | Err { message } ->
+          log (Printf.sprintf "← Registration error id=0: %s" message)
+        | other ->
+          log (Printf.sprintf "← Unexpected id=0 response: %s" (response_type_name other)));
+       state
      | Ok (Response { id; response }) ->
-       log (Printf.sprintf "Bridge response: %s id=%d (pending: %d)"
+       log (Printf.sprintf "← %s id=%d (pending: %d)"
          (response_type_name response) id (Map.length state.pending));
        (match Map.find state.pending id with
         | None ->
@@ -233,8 +249,6 @@ let handle_bridge_message (state : state) (raw : string) : state =
         | Some cb ->
           cb response;
           { state with pending = Map.remove state.pending id })
-     | Ok (Push { id = _; push = p }) ->
-       handle_push state p
      | Error msg ->
        log (Printf.sprintf "Failed to parse bridge message: %s" msg);
        state)

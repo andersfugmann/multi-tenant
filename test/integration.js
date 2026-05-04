@@ -240,17 +240,18 @@ async function testBridge() {
 
   const reader = createNativeMessageReader(proc.stdout);
 
-  // 1. Register
+  // 1. Register (id=0 per protocol convention)
   console.log("Register:");
-  writeNativeMessage(proc.stdin, [
-    "Register",
-    { brand: "Integration Test", address: TEST_ADDR, name: "test-node" },
-  ]);
+  writeNativeMessage(proc.stdin, {
+    id: 0,
+    command: ["Register", { brand: "Integration Test", address: TEST_ADDR, name: "test-node" }],
+    tenant: "test-node",
+  });
 
   const regResp = await reader.read();
-  // Should be ["Response", {id: 1, response: ["Ok_registered", {tenant_id: "test-node"}]}]
+  // Should be ["Response", {id: 0, response: ["Ok_registered", {tenant_id: "test-node"}]}]
   assertEqual(regResp[0], "Response", "register response is Response");
-  assertEqual(regResp[1].id, 1, "register response id=1");
+  assertEqual(regResp[1].id, 0, "register response id=0");
   assertEqual(regResp[1].response[0], "Ok_registered", "register response is Ok_registered");
   assertEqual(regResp[1].response[1].tenant_id, "test-node", "tenant_id=test-node");
 
@@ -263,12 +264,12 @@ async function testBridge() {
   assert(Array.isArray(pushMsg[1].push[1].registered_tenants), "has registered_tenants list");
   assert(pushMsg[1].push[1].registered_tenants.includes("test-node"), "test-node is registered");
 
-  // 3. Status
+  // 3. Status (extension sends Wire.request with its own ID)
   console.log("\nStatus:");
-  writeNativeMessage(proc.stdin, ["Status"]);
+  writeNativeMessage(proc.stdin, { id: 1, command: ["Status"] });
   const statusResp = await reader.read();
   assertEqual(statusResp[0], "Response", "status is Response");
-  assert(statusResp[1].id >= 2, `status id >= 2 (got ${statusResp[1].id})`);
+  assertEqual(statusResp[1].id, 1, "status id=1");
   assertEqual(statusResp[1].response[0], "Ok_status", "status response is Ok_status");
   const statusInfo = statusResp[1].response[1];
   assert(Array.isArray(statusInfo.registered_tenants), "status has registered_tenants");
@@ -276,9 +277,10 @@ async function testBridge() {
 
   // 4. Get_config
   console.log("\nGet_config:");
-  writeNativeMessage(proc.stdin, ["Get_config"]);
+  writeNativeMessage(proc.stdin, { id: 2, command: ["Get_config"] });
   const cfgResp = await reader.read();
   assertEqual(cfgResp[0], "Response", "get_config is Response");
+  assertEqual(cfgResp[1].id, 2, "get_config id=2");
   assertEqual(cfgResp[1].response[0], "Ok_config", "response is Ok_config");
   const config = cfgResp[1].response[1];
   assert(Array.isArray(config.listen), "config has listen");
@@ -287,18 +289,19 @@ async function testBridge() {
 
   // 5. Test URL routing
   console.log("\nTest URL:");
-  writeNativeMessage(proc.stdin, ["Test", { url: "https://example.com" }]);
+  writeNativeMessage(proc.stdin, { id: 3, command: ["Test", { url: "https://example.com" }] });
   const testResp = await reader.read();
   assertEqual(testResp[0], "Response", "test is Response");
+  assertEqual(testResp[1].id, 3, "test id=3");
   const testResult = testResp[1].response;
   assert(testResult[0] === "Ok_test", `test response is Ok_test (got ${testResult[0]})`);
 
   // 6. Add rule (may trigger a config push before or after the response)
   console.log("\nAdd rule:");
-  writeNativeMessage(proc.stdin, [
-    "Add_rule",
-    { rule: { pattern: "https://test-integration[.]example[.]com/.*", target: "test-node", enabled: true } },
-  ]);
+  writeNativeMessage(proc.stdin, {
+    id: 4,
+    command: ["Add_rule", { rule: { pattern: "https://test-integration[.]example[.]com/.*", target: "test-node", enabled: true } }],
+  });
 
   // Read two messages: one Response + one Push (order not guaranteed)
   const addMsg1 = await reader.read();
@@ -307,47 +310,52 @@ async function testBridge() {
   const addPush = [addMsg1, addMsg2].find((m) => m[0] === "Push");
   assert(addResp !== undefined, "add_rule got Response");
   assert(addPush !== undefined, "add_rule triggered config Push");
+  assertEqual(addResp[1].id, 4, "add_rule response id=4");
   assertEqual(addResp[1].response[0], "Ok_unit", "add_rule result is Ok_unit");
 
   // 7. Test the new rule
   console.log("\nTest new rule:");
-  writeNativeMessage(proc.stdin, [
-    "Test",
-    { url: "https://test-integration.example.com/page" },
-  ]);
+  writeNativeMessage(proc.stdin, {
+    id: 5,
+    command: ["Test", { url: "https://test-integration.example.com/page" }],
+  });
   const testResp2 = await reader.read();
+  assertEqual(testResp2[1].id, 5, "test2 id=5");
   assertEqual(testResp2[1].response[0], "Ok_test", "test is Ok_test");
   assertEqual(testResp2[1].response[1][0], "Match", "test result is Match");
   assertEqual(testResp2[1].response[1][1].tenant, "test-node", "matched tenant=test-node");
 
   // 8. Delete the rule we added (find its index)
   console.log("\nDelete rule:");
-  writeNativeMessage(proc.stdin, ["Get_config"]);
+  writeNativeMessage(proc.stdin, { id: 6, command: ["Get_config"] });
   const cfg2Resp = await reader.read();
+  assertEqual(cfg2Resp[1].id, 6, "get_config2 id=6");
   const rules = cfg2Resp[1].response[1].rules;
   const ruleIdx = rules.findIndex(
     (r) => r.pattern === "https://test-integration[.]example[.]com/.*"
   );
   assert(ruleIdx >= 0, `found test rule at index ${ruleIdx}`);
 
-  writeNativeMessage(proc.stdin, ["Delete_rule", { index: ruleIdx }]);
+  writeNativeMessage(proc.stdin, { id: 7, command: ["Delete_rule", { index: ruleIdx }] });
   // Response + config push (order not guaranteed)
   const delMsg1 = await reader.read();
   const delMsg2 = await reader.read();
   const delResp = [delMsg1, delMsg2].find((m) => m[0] === "Response");
   assert(delResp !== undefined, "delete_rule got Response");
+  assertEqual(delResp[1].id, 7, "delete_rule id=7");
   assertEqual(delResp[1].response[0], "Ok_unit", "delete_rule result is Ok_unit");
 
   // 9. Correlation ID ordering — fire two commands quickly
   console.log("\nCorrelation ID ordering:");
-  writeNativeMessage(proc.stdin, ["Status"]);
-  writeNativeMessage(proc.stdin, ["Get_config"]);
+  writeNativeMessage(proc.stdin, { id: 8, command: ["Status"] });
+  writeNativeMessage(proc.stdin, { id: 9, command: ["Get_config"] });
   const r1 = await reader.read();
   const r2 = await reader.read();
-  // Both should be Responses; the IDs should be sequential
+  // Both should be Responses with the IDs we assigned
   assertEqual(r1[0], "Response", "rapid-fire r1 is Response");
   assertEqual(r2[0], "Response", "rapid-fire r2 is Response");
-  assert(r1[1].id < r2[1].id, `IDs are ordered: ${r1[1].id} < ${r2[1].id}`);
+  assertEqual(r1[1].id, 8, "r1 id=8");
+  assertEqual(r2[1].id, 9, "r2 id=9");
   // First should be Status, second Get_config (FIFO through bridge)
   assertEqual(r1[1].response[0], "Ok_status", "r1 is Status response");
   assertEqual(r2[1].response[0], "Ok_config", "r2 is Get_config response");

@@ -387,7 +387,6 @@ let dispatch_command :
 let rec coordinator_loop state inbox ~sw ~clock =
   let state = match Eio.Stream.take inbox with
     | Dispatch { id; command = Protocol.Command cmd; tenant; reply } ->
-      log "req[%s]: id=%d" tenant id;
       dispatch_command state tenant id cmd ~reply ~sw ~clock ~inbox
     | Register_tenant { tenant; brand; push_stream; reply } ->
       (match Map.mem state.registry tenant with
@@ -490,7 +489,7 @@ let handle_register inbox ~tenant ~brand ~register_id flow reader =
               | Error msg ->
                 log "req[%s]: parse error: %s" tenant msg
               | Ok req ->
-                log "req[%s]: id=%d" tenant req.id;
+                log "req[%s]: id=%d %s" tenant req.id (Protocol.wire_command_name req.command);
                 let (promise, reply) = Eio.Promise.create () in
                 let (Protocol.Command _cmd) = Protocol.command_of_wire req.command in
                 Eio.Stream.add inbox (Dispatch { id = req.id; command = Protocol.command_of_wire req.command; tenant; reply });

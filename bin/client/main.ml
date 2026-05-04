@@ -331,13 +331,24 @@ let read_native_message source : Yojson.Safe.t option =
         | json -> Some json
         | exception Yojson.Json_error _ -> None))
 
-let write_native_message sink (json : Yojson.Safe.t) : unit =
-  let data = Yojson.Safe.to_string json in
+let read_native_message_raw source : string option =
+  let len_buf = Cstruct.create 4 in
+  match Eio.Flow.read_exact source len_buf with
+  | exception End_of_file -> None
+  | exception Eio.Io _ -> None
+  | () ->
+    let len = Cstruct.LE.get_uint32 len_buf 0 |> Int32.to_int_exn in
+    let data_buf = Cstruct.create len in
+    (match Eio.Flow.read_exact source data_buf with
+     | exception End_of_file -> None
+     | exception Eio.Io _ -> None
+     | () -> Some (Cstruct.to_string data_buf))
+
+let write_native_message_raw sink (data : string) : unit =
   let len = String.length data in
   let len_buf = Cstruct.create 4 in
   Cstruct.LE.set_uint32 len_buf 0 (Int32.of_int_exn len);
-  Eio.Flow.copy_string (Cstruct.to_string len_buf) sink;
-  Eio.Flow.copy_string data sink
+  Eio.Flow.copy_string (Cstruct.to_string len_buf ^ data) sink
 
 (* -- Bridge mode: transparent relay *)
 
@@ -347,28 +358,34 @@ let run_bridge env =
   let stdout_flow = Eio.Stdenv.stdout env in
   let stdin_flow = Eio.Stdenv.stdin env in
   let stdout_stream = Eio.Stream.create 64 in
-  (* Read first message from extension: Register with brand and optional overrides *)
-  let (brand, tenant, addr_override) =
+  (* First message must be Wire.request with Register command *)
+  let (tenant, addr_override, register_line) =
     match read_native_message stdin_flow with
     | Some json ->
-      (match Protocol.Wire.command_of_yojson json with
-       | Ok (Register { brand; address; name }) ->
+      (match Protocol.Wire.request_of_yojson json with
+       | Ok { command = Register { brand = _; address; name }; _ } ->
          let tenant = Option.value name ~default:default_tenant in
-         (brand, tenant, address)
+         let patched : Protocol.Wire.request = {
+           id = 0;
+           command = Register { brand = None; address = None; name = Some tenant };
+           tenant = Some tenant;
+         } in
+         (tenant, address, Protocol.serialize_request patched)
        | _ ->
-         let err_msg = Protocol.Wire.Response { id = 0; response = Err { message = "expected Register as first message" } } in
-         Eio.Stream.add stdout_stream (Protocol.Wire.server_message_to_yojson err_msg);
-         (None, default_tenant, None))
-    | None -> (None, default_tenant, None)
+         let err = Protocol.serialize_server_message
+           (Response { id = 0; response = Err { message = "expected Register as first message" } }) in
+         Eio.Stream.add stdout_stream err;
+         (default_tenant, None, ""))
+    | None -> (default_tenant, None, "")
   in
   let default_addr = Printf.sprintf "127.0.0.1:%d" Protocol.default_port in
   let addr = Protocol.parse_address
     (Option.value addr_override ~default:default_addr) in
-  (* stdout writer fiber: single writer ensures no interleaving *)
+  (* stdout writer: single writer ensures no interleaving *)
   let write_stdout () =
     let rec loop () =
-      let json = Eio.Stream.take stdout_stream in
-      write_native_message stdout_flow json;
+      let s = Eio.Stream.take stdout_stream in
+      write_native_message_raw stdout_flow s;
       loop ()
     in
     loop ()
@@ -379,53 +396,39 @@ let run_bridge env =
       match
         Eio.Switch.run @@ fun sw ->
         let flow = connect_to_daemon ~sw net addr in
-        (* Send Register to server *)
-        let register_req : Protocol.Wire.request = {
-          id = 1;
-          command = Register { brand; address = None; name = Some tenant };
-          tenant = Some tenant;
-        } in
-        Eio.Flow.copy_string (Protocol.serialize_request register_req ^ "\n") flow;
+        (* Send Register to daemon *)
+        (match String.is_empty register_line with
+         | true -> ()
+         | false -> Eio.Flow.copy_string (register_line ^ "\n") flow);
         let reader = Eio.Buf_read.of_flow ~max_size:(1024 * 1024) flow in
-        (* Read registration response *)
+        (* Read registration response and forward to extension *)
         let first_line = Eio.Buf_read.line reader in
         (match Protocol.deserialize_server_message first_line with
-         | Ok (Response { id; response = Ok_registered _ } as msg) ->
-           Eio.Stream.add stdout_stream (Protocol.Wire.server_message_to_yojson msg);
-           ignore (id : int)
-         | Ok (Response { id = _; response = Err { message } }) ->
+         | Ok (Response { response = Ok_registered _; _ }) ->
+           Eio.Stream.add stdout_stream first_line
+         | Ok (Response { response = Err { message }; _ }) ->
            eprintf "Registration failed: %s\n%!" message;
            failwith message
          | _ ->
            eprintf "Unexpected registration response\n%!";
            failwith "unexpected registration response");
-        (* Two forwarding fibers *)
+        (* Transparent relay: no parsing, no ID management *)
         Eio.Fiber.both
           (fun () ->
-            (* TCP → stdout: forward all server messages *)
+            (* TCP → stdout: forward raw lines as native messages *)
             let rec read_tcp () =
               let line = Eio.Buf_read.line reader in
-              (match Protocol.parse_json_string line with
-               | Ok json -> Eio.Stream.add stdout_stream json
-               | Error msg -> eprintf "Bridge: bad JSON from server: %s\n%!" msg);
+              Eio.Stream.add stdout_stream line;
               read_tcp ()
             in
             read_tcp ())
           (fun () ->
-            (* stdin → TCP: forward extension commands *)
-            let next_id = ref 2 in
+            (* stdin → TCP: forward raw native messages as lines *)
             let rec read_stdin () =
-              match read_native_message stdin_flow with
+              match read_native_message_raw stdin_flow with
               | None -> ()
-              | Some json ->
-                (* Extension sends Wire.command, we wrap as Wire.request *)
-                let id = !next_id in
-                next_id := id + 1;
-                let req_json = `Assoc [
-                  ("id", `Int id);
-                  ("command", json);
-                ] in
-                Eio.Flow.copy_string (Yojson.Safe.to_string req_json ^ "\n") flow;
+              | Some data ->
+                Eio.Flow.copy_string (data ^ "\n") flow;
                 read_stdin ()
             in
             read_stdin ())
@@ -433,9 +436,9 @@ let run_bridge env =
       | () -> ()
       | exception exn ->
         eprintf "Bridge error: %s, reconnecting in 2s…\n%!" (Exn.to_string exn);
-        (* Send re-registration push so extension knows we reconnected *)
-        let re_reg = Protocol.Wire.Push { id = 0; push = Registered { tenant_id = tenant } } in
-        Eio.Stream.add stdout_stream (Protocol.Wire.server_message_to_yojson re_reg);
+        let re_reg = Protocol.serialize_server_message
+          (Push { id = 0; push = Registered { tenant_id = tenant } }) in
+        Eio.Stream.add stdout_stream re_reg;
         Eio_unix.sleep 2.0;
         connect_loop ()
     in
