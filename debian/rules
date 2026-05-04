@@ -40,22 +40,17 @@ override_dh_auto_install:
 	mkdir -p debian/alloy/etc/opt/edge/native-messaging-hosts
 	ln -sf /usr/share/alloy/alloy.json \
 		debian/alloy/etc/opt/edge/native-messaging-hosts/alloy.json
-	# Canonical extension descriptor (used by Edge and other Chromium forks)
+	# Edge extension descriptor (external_update_url via HTTP)
 	install -D -m 644 debian/$(EXT_ID).json \
 		debian/alloy/usr/share/alloy/$(EXT_ID).json
-	# Chromium and Chrome: external_update_url via HTTP
-	mkdir -p debian/alloy/usr/share/chromium/extensions
-	ln -sf /usr/share/alloy/$(EXT_ID).json \
-		debian/alloy/usr/share/chromium/extensions/$(EXT_ID).json
-	mkdir -p debian/alloy/usr/share/google-chrome/extensions
-	ln -sf /usr/share/alloy/$(EXT_ID).json \
-		debian/alloy/usr/share/google-chrome/extensions/$(EXT_ID).json
-	# Edge still uses the extensions directory mechanism
 	for variant in msedge msedge-beta msedge-dev msedge-canary; do \
 		mkdir -p debian/alloy/opt/microsoft/$$variant/extensions; \
 		ln -sf /usr/share/alloy/$(EXT_ID).json \
 			debian/alloy/opt/microsoft/$$variant/extensions/$(EXT_ID).json; \
 	done
+	# Chromium/Chrome: install unpacked extension for "Load unpacked" or external_crx
+	mkdir -p debian/alloy/usr/share/alloy/extension
+	cp -r _build/ext-staging/* debian/alloy/usr/share/alloy/extension/
 	install -D -m 644 _build/extension.crx \
 		debian/alloy/usr/share/alloy/extension.crx
 	install -D -m 644 debian/updates.xml \
