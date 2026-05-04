@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Alloy",
-  "version": "0.9.7",
+  "version": "0.9.9",
   "description": "Route URLs between browser profiles",
   "permissions": [
     "webNavigation",
@@ -28,5 +28,5 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApsPleNWyp0Mpeidh94/GjNMW3izEouUP9s8dNB1UCX/wkEKjwa4rJAohicPxGjr1cAOHQQ8hatwlFOs9td7PdL0yrrH4r4U1acA0q0UdYU5LCqlTkk6MXmftw58aO6opmmq+38+z8HAbcrDee8UQnZYn/t7g3BJzW414/Uv/ehhza6kvsLhFk2eI1mJyYh7o/irhGuLibVfxK9gX4guKTAy63LLNNvludwoqqfTch+L8GBdHFcixEOmd+DsAEDuZ6t8NBFZYe0bC9+c8iOd84UlFUDye4KyP96rdTBRohLO2gKntNvs0LxsWRVvBwCTCKxtsIuByX+lEye8aNeKc2wIDAQAB"
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApWJZF+oWyibg3uxDjvXoxtidrlECUGnnC22M74mowcMto1l44ZVmU6W37HuP775y7ieL1NwsQctrEK4aoc2ft1TBKx5C1eu5RdLgvMrW+VtjrGQKeCLhywJ66I8ihmtaL8wBeqkgpHbREAluN7sDTN0ZyygAnDStgcUpESgLeA3WZghoGKcToXSU+3tDUI6vb6Yw3S29uP63tpJFGr9sZvTpkfDvYVgvATNhH1kRcD3rxuzqilESf+M6LXgOc/qlVUn8H9mB24JA9WCxKgGQ39rBySLulpTflgvzFjVpO5n4d3GX3SvsRRbzGY0EEXcxRS0RvgSXCz/LnkfgWZOGpQIDAQAB"
 }
