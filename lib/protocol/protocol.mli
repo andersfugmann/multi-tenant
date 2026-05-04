@@ -152,6 +152,7 @@ end
 val command_to_wire : 'a command -> Wire.command
 val command_of_wire : Wire.command -> packed_command
 val response_to_wire : 'a command -> ('a, string) Result.t -> Wire.response
+val response_of_wire : 'a command -> Wire.response -> ('a, string) Result.t
 
 (** {1 JSON serialization — commands} *)
 

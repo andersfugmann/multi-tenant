@@ -159,48 +159,36 @@ let cli_term () =
 
 (* Format response as human-readable CLI output *)
 
+let format_route_result = function
+  | Protocol.Local -> "Local"
+  | Protocol.Remote tid -> Printf.sprintf "Remote: %s" tid
+
+let format_test_result = function
+  | Protocol.Match { tenant; rule_index } ->
+    Printf.sprintf "Match: tenant=%s rule=%d" tenant rule_index
+  | Protocol.No_match { default_tenant } ->
+    Printf.sprintf "No match: default=%s" default_tenant
+
 let format_response : type a. a Protocol.command -> (a, string) Result.t -> string = fun cmd resp ->
-  match cmd with
-  | Protocol.Register _ ->
-    (match resp with
-     | Error msg -> Printf.sprintf "Error: %s" msg
-     | Ok tid -> Printf.sprintf "Registered as %s" tid)
-  | Protocol.Open _ ->
-    (match resp with
-     | Error msg -> Printf.sprintf "Error: %s" msg
-     | Ok Local -> "Local"
-     | Ok (Remote tid) -> Printf.sprintf "Remote: %s" tid)
-  | Protocol.Open_on _ ->
-    (match resp with
-     | Error msg -> Printf.sprintf "Error: %s" msg
-     | Ok Local -> "Local"
-     | Ok (Remote tid) -> Printf.sprintf "Remote: %s" tid)
-  | Protocol.Test _ ->
-    (match resp with
-     | Error msg -> Printf.sprintf "Error: %s" msg
-     | Ok (Match { tenant; rule_index }) ->
-       Printf.sprintf "Match: tenant=%s rule=%d" tenant rule_index
-     | Ok (No_match { default_tenant }) ->
-       Printf.sprintf "No match: default=%s" default_tenant)
-  | Protocol.Get_config ->
-    (match resp with
-     | Error msg -> Printf.sprintf "Error: %s" msg
-     | Ok value -> Yojson.Safe.pretty_to_string (Protocol.config_to_yojson value))
-  | Protocol.Set_config _ ->
-    (match resp with Error msg -> Printf.sprintf "Error: %s" msg | Ok () -> "OK")
-  | Protocol.Add_rule _ ->
-    (match resp with Error msg -> Printf.sprintf "Error: %s" msg | Ok () -> "OK")
-  | Protocol.Update_rule _ ->
-    (match resp with Error msg -> Printf.sprintf "Error: %s" msg | Ok () -> "OK")
-  | Protocol.Delete_rule _ ->
-    (match resp with Error msg -> Printf.sprintf "Error: %s" msg | Ok () -> "OK")
-  | Protocol.Status ->
-    (match resp with
-     | Error msg -> Printf.sprintf "Error: %s" msg
-     | Ok info ->
-       Printf.sprintf "Tenants: %s\nUptime: %ds"
-         (String.concat ~sep:", " info.registered_tenants)
-         info.uptime_seconds)
+  match resp with
+  | Error msg -> Printf.sprintf "Error: %s" msg
+  | Ok value ->
+    begin match cmd with
+    | Protocol.Register _ -> Printf.sprintf "Registered as %s" value
+    | Protocol.Open _ -> format_route_result value
+    | Protocol.Open_on _ -> format_route_result value
+    | Protocol.Test _ -> format_test_result value
+    | Protocol.Get_config ->
+      Yojson.Safe.pretty_to_string (Protocol.config_to_yojson value)
+    | Protocol.Set_config _ -> "OK"
+    | Protocol.Add_rule _ -> "OK"
+    | Protocol.Update_rule _ -> "OK"
+    | Protocol.Delete_rule _ -> "OK"
+    | Protocol.Status ->
+      Printf.sprintf "Tenants: %s\nUptime: %ds"
+        (String.concat ~sep:", " value.registered_tenants)
+        value.uptime_seconds
+    end
 
 (* -- Connect to daemon helper *)
 
@@ -226,9 +214,7 @@ let send_command_cli :
     string =
  fun ~net ~tenant ~addr cmd ->
   Eio.Switch.run @@ fun sw ->
-  let flow =
-    connect_to_daemon ~sw net addr
-  in
+  let flow = connect_to_daemon ~sw net addr in
   let wire_cmd = Protocol.command_to_wire cmd in
   let req : Protocol.Wire.request = { id = 1; command = wire_cmd; tenant = Some tenant } in
   Eio.Flow.copy_string (Protocol.serialize_request req ^ "\n") flow;
@@ -236,36 +222,7 @@ let send_command_cli :
   let response_line = Eio.Buf_read.line reader in
   match Protocol.deserialize_server_message response_line with
   | Ok (Response { id = _; response }) ->
-    (match response with
-     | Err { message } -> format_response cmd (Error message)
-     | Ok_registered { tenant_id } ->
-       (match cmd with
-        | Register _ -> format_response cmd (Ok tenant_id)
-        | _ -> Printf.sprintf "Unexpected response: Ok_registered")
-     | Ok_route r ->
-       (match cmd with
-        | Open _ -> format_response cmd (Ok r)
-        | Open_on _ -> format_response cmd (Ok r)
-        | _ -> Printf.sprintf "Unexpected response: Ok_route")
-     | Ok_test t ->
-       (match cmd with
-        | Test _ -> format_response cmd (Ok t)
-        | _ -> Printf.sprintf "Unexpected response: Ok_test")
-     | Ok_config c ->
-       (match cmd with
-        | Get_config -> format_response cmd (Ok c)
-        | _ -> Printf.sprintf "Unexpected response: Ok_config")
-     | Ok_status s ->
-       (match cmd with
-        | Status -> format_response cmd (Ok s)
-        | _ -> Printf.sprintf "Unexpected response: Ok_status")
-     | Ok_unit ->
-       (match cmd with
-        | Set_config _ -> format_response cmd (Ok ())
-        | Add_rule _ -> format_response cmd (Ok ())
-        | Update_rule _ -> format_response cmd (Ok ())
-        | Delete_rule _ -> format_response cmd (Ok ())
-        | _ -> Printf.sprintf "Unexpected response: Ok_unit"))
+    format_response cmd (Protocol.response_of_wire cmd response)
   | Ok (Push _) -> "Unexpected push message"
   | Error msg -> Printf.sprintf "Response parse error: %s" msg
 
@@ -314,23 +271,6 @@ let run_register ~net ~addr ~tenant =
 
 (* -- Native messaging framing *)
 
-let read_native_message source : Yojson.Safe.t option =
-  let len_buf = Cstruct.create 4 in
-  match Eio.Flow.read_exact source len_buf with
-  | exception End_of_file -> None
-  | exception Eio.Io _ -> None
-  | () ->
-    let len = Cstruct.LE.get_uint32 len_buf 0 |> Int32.to_int_exn in
-    let data_buf = Cstruct.create len in
-    (match Eio.Flow.read_exact source data_buf with
-     | exception End_of_file -> None
-     | exception Eio.Io _ -> None
-     | () ->
-       let s = Cstruct.to_string data_buf in
-       (match Yojson.Safe.from_string s with
-        | json -> Some json
-        | exception Yojson.Json_error _ -> None))
-
 let read_native_message_raw source : string option =
   let len_buf = Cstruct.create 4 in
   match Eio.Flow.read_exact source len_buf with
@@ -339,10 +279,18 @@ let read_native_message_raw source : string option =
   | () ->
     let len = Cstruct.LE.get_uint32 len_buf 0 |> Int32.to_int_exn in
     let data_buf = Cstruct.create len in
-    (match Eio.Flow.read_exact source data_buf with
-     | exception End_of_file -> None
-     | exception Eio.Io _ -> None
-     | () -> Some (Cstruct.to_string data_buf))
+    begin match Eio.Flow.read_exact source data_buf with
+    | exception End_of_file -> None
+    | exception Eio.Io _ -> None
+    | () -> Some (Cstruct.to_string data_buf)
+    end
+
+let read_native_message source : Yojson.Safe.t option =
+  read_native_message_raw source
+  |> Option.bind ~f:(fun s ->
+    match Yojson.Safe.from_string s with
+    | json -> Some json
+    | exception Yojson.Json_error _ -> None)
 
 let write_native_message_raw sink (data : string) : unit =
   let len = String.length data in
@@ -451,11 +399,7 @@ let run_cli { mode; address; name } =
     Protocol.parse_address
       (Option.value address ~default:default_addr)
   in
-  let resolve_tenant default =
-    match name with
-    | Some n -> n
-    | None -> default
-  in
+  let resolve_tenant default = Option.value name ~default in
   match mode with
   | Bridge -> run_bridge env
   | Register_stream ->

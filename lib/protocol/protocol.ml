@@ -345,6 +345,41 @@ let response_to_wire : type a. a command -> (a, string) Result.t -> Wire.respons
      | Delete_rule _ -> Ok_unit
      | Status -> Ok_status value)
 
+let response_of_wire : type a. a command -> Wire.response -> (a, string) Result.t =
+ fun cmd resp ->
+  match resp with
+  | Err { message } -> Error message
+  | Ok_registered { tenant_id } ->
+    (match cmd with
+     | Register _ -> Ok tenant_id
+     | _ -> Error "unexpected Ok_registered")
+  | Ok_route r ->
+    begin match cmd with
+    | Open _ -> Ok r
+    | Open_on _ -> Ok r
+    | _ -> Error "unexpected Ok_route"
+    end
+  | Ok_test t ->
+    (match cmd with
+     | Test _ -> Ok t
+     | _ -> Error "unexpected Ok_test")
+  | Ok_config c ->
+    (match cmd with
+     | Get_config -> Ok c
+     | _ -> Error "unexpected Ok_config")
+  | Ok_status s ->
+    (match cmd with
+     | Status -> Ok s
+     | _ -> Error "unexpected Ok_status")
+  | Ok_unit ->
+    begin match cmd with
+    | Set_config _ -> Ok ()
+    | Add_rule _ -> Ok ()
+    | Update_rule _ -> Ok ()
+    | Delete_rule _ -> Ok ()
+    | _ -> Error "unexpected Ok_unit"
+    end
+
 (* -- JSON serialization helpers *)
 
 let serialize_command_json : type a. a command -> Yojson.Safe.t =
